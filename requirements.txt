@@ -1,0 +1,8 @@
+Flask==3.0.0
+flask-cors==4.0.0
+pandas==2.1.4
+yfinance==0.2.33
+pandas-ta==0.3.14b0
+numpy==1.26.2
+pytz==2023.3
+gunicorn==21.2.0
