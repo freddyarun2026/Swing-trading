@@ -1,7 +1,7 @@
 Flask==3.0.0
 flask-cors==4.0.0
-pandas==2.2.3
-yfinance==0.2.48
-pandas-ta==0.4.71b0
-pytz==2024.1
+pandas
+yfinance
+pandas-ta
+pytz
 gunicorn==21.2.0
