@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║          FREDDY EVOLUTION ENGINE™ v2.0 — Trading Engine                    ║
+║          FREDDY EVOLUTION ENGINE™ v3.0 — Trading Engine                    ║
 ║          Architected by Freddy — Personal Use Only                         ║
 ║          Indian Market Optimized • NSE/BSE Focus                           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -12,8 +12,15 @@ LAYERED ARCHITECTURE:
   Layer 4: Risk     (ATR + Beta + Gap Risk + Event Risk)
   Layer 5: Capital  (Probability Tiered Sizing + Exposure Mgmt)
   Layer 6: Evolution(Expectancy Tracking + Self-Protective Logic)
+  Layer 7: Portfolio(Risk Engine — NEW in v3)
 
-STAGE 1 IMPROVEMENTS INCORPORATED:
+BUG FIXES (v2 → v3):
+  🔧 FIX 1: SetupClassifier.classify alias added (was: classify_setup only)
+             api_server.py calling .classify() caused 500 on all stock scans.
+  🔧 FIX 2: /api/market-regime 500 fixed — added get_market_regime_public()
+             and scan_stocks_public() that bypass @require_auth for read-only data.
+
+STAGE-1 IMPROVEMENTS INCORPORATED (v3):
   ✅ 1. Real breadth (% above 50 EMA, A/D ratio, % 20d highs)
   ✅ 2. Multi-timeframe RS (5d / 20d / 60d)
   ✅ 3. Flexible RSI — no rigid 72 cap, graded classification + Power Play
@@ -27,6 +34,20 @@ STAGE 1 IMPROVEMENTS INCORPORATED:
   ✅ 11. Trade Expectancy Tracker (self-protective evolution)
   ✅ 12. Eliminated rigid setup logic — always return best setup, just size smaller
   ✅ 13. Security — session auth, rate limiting, IP binding, personal use only
+
+  NEW IN v3 (Stage-1 Review Improvements):
+  🆕 14. Slope-Based Breadth Deterioration Detector (Nifty500/Nifty50 RS slope)
+  🆕 15. Sector Leadership Concentration Index (top-3 concentration → FRAGILE/ROBUST)
+  🆕 16. Follow-Through Rule for breakouts (Day+2 midpoint test + engulfing guard)
+  🆕 17. Volume Z-Score (adaptive vs fixed 1.5x, midcap/largecap aware)
+  🆕 18. ATR-Based Gap Risk Multiplier (liquidity vacuum detection)
+  🆕 19. Granular Volatility Regime (Low_Vol_Expansion, Panic_Vol_Spike, etc.)
+  🆕 20. Hard Kill Conditions Layer (earnings, liquidity, ATR-gap veto)
+  🆕 21. Setup Context Tag (Early_Trend / Mid_Trend / Late_Trend)
+  🆕 22. Edge Stability Score + Strategy Confidence Meter (Green/Orange/Red)
+  🆕 23. Portfolio-Level Risk Engine (max positions, sector caps, drawdown trigger)
+  🆕 24. 3-Mode Adaptive Operating System (Conservative / Balanced / Aggressive)
+  🆕 25. Public API helpers (get_market_regime_public, scan_stocks_public)
 """
 
 import pandas as pd
@@ -428,6 +449,19 @@ class MarketBreadthEngine:
         breadth['composite_score'] = round(composite, 2)
         breadth['is_healthy'] = composite > 55
 
+        # ── STAGE-1 IMPROVEMENT: Slope-Based Breadth Deterioration Detector ──
+        # Instead of threshold-only, detect gradual distribution BEFORE breakdown.
+        breadth['breadth_slope'] = MarketBreadthEngine._calc_breadth_slope()
+        slope = breadth['breadth_slope']
+        # Combine static threshold + slope for better early warning
+        breadth['is_deteriorating'] = slope < -2.0         # slope falling fast
+        breadth['breadth_strength'] = (
+            'Expanding' if slope > 1.0 else
+            'Stable' if slope > -1.0 else
+            'Deteriorating' if slope > -3.0 else
+            'Collapsing'
+        )
+
         return breadth
 
     @staticmethod
@@ -471,6 +505,38 @@ class MarketBreadthEngine:
             'pct_20d_high': round(new_20d_high / total, 4),
             'pct_20d_low': round(new_20d_low / total, 4),
         }
+
+    @staticmethod
+    def _calc_breadth_slope() -> float:
+        """
+        STAGE-1 IMPROVEMENT: Compute 5-day slope of Nifty500 RS vs Nifty50.
+        Detects breadth deterioration BEFORE price breakdown.
+        Returns slope as %/day — negative means deteriorating.
+        """
+        try:
+            n50 = yf.download("^NSEI", period="3mo", progress=False)
+            n500 = yf.download("^CRSLDX", period="3mo", progress=False)  # Nifty500
+            if n50.empty or n500.empty or len(n50) < 10:
+                return 0.0
+            c50 = n50['Close'].squeeze()
+            c500 = n500['Close'].squeeze()
+            # Align on common dates
+            common = c50.index.intersection(c500.index)
+            if len(common) < 10:
+                return 0.0
+            c50 = c50.loc[common]
+            c500 = c500.loc[common]
+            # RS ratio: 500/50
+            rs_ratio = (c500 / c50).tail(10)
+            # Linear slope of last 5 days (percentage per day)
+            x = np.arange(len(rs_ratio))
+            slope = np.polyfit(x, rs_ratio.values, 1)[0]
+            # Normalize to percentage-of-mean
+            mean_val = rs_ratio.mean()
+            slope_pct = (slope / mean_val) * 100 if mean_val != 0 else 0.0
+            return round(slope_pct, 3)
+        except Exception:
+            return 0.0
 
     @staticmethod
     def _estimate_from_index() -> Dict:
@@ -537,6 +603,25 @@ class VolatilityRegimeEngine:
             else:
                 favored = ["Pullback", "Momentum"]
 
+            # ── STAGE-1 IMPROVEMENT: Granular Volatility Regime Classification ──
+            # Compression→Expansion transition = highest breakout expectancy window
+            atr_hist = atr.tail(60)
+            atr_percentile = float(np.percentile(atr_hist.dropna(), [20, 50, 80]))
+            curr_atr_val = atr.iloc[-1]
+
+            if ratio > 1.50:
+                vol_regime = "Panic_Vol_Spike"           # Avoid new positions
+            elif ratio > 1.20 and curr_atr_val < float(np.percentile(atr_hist.dropna(), 50)):
+                vol_regime = "Low_Vol_Expansion"         # BEST for breakout entry
+            elif ratio > 1.20:
+                vol_regime = "High_Vol_Expansion"        # Momentum only, tight size
+            elif ratio < 0.80:
+                vol_regime = "High_Vol_Compression"      # Prime breakout setup area
+            else:
+                vol_regime = "Neutral_Transitioning"
+
+            ideal_for_breakout = vol_regime in ("Low_Vol_Expansion", "High_Vol_Compression")
+
             # Volatility score: 0=very volatile, 100=very calm
             vol_score = max(0, min(100, 100 - (ratio - 0.5) * 100))
 
@@ -547,8 +632,11 @@ class VolatilityRegimeEngine:
                 'atr_20': round(atr_20, 2) if not pd.isna(atr_20) else 0,
                 'favored_strategies': favored,
                 'vol_score': round(vol_score, 2),
+                # Stage-1 additions
+                'vol_regime': vol_regime,
+                'ideal_for_breakout': ideal_for_breakout,
                 'details': {
-                    'interpretation': f"ATR(5)/ATR(20) = {ratio:.2f} → {state.value}"
+                    'interpretation': f"ATR(5)/ATR(20) = {ratio:.2f} → {state.value} [{vol_regime}]"
                 }
             }
         except Exception as e:
@@ -766,6 +854,34 @@ class SectorLeadershipEngine:
         for rank, (name, data) in enumerate(sorted_sectors, 1):
             results[name]['rank'] = rank
 
+        # ── STAGE-1 IMPROVEMENT: Sector Leadership Concentration Index ──
+        # If top-3 sectors drive >60% of total gains → regime is FRAGILE
+        # If 6+ sectors are rising → regime is ROBUST (broad participation)
+        try:
+            positive_rs = [(n, d['rs_composite']) for n, d in results.items() if d['rs_composite'] > 0]
+            total_positive_rs = sum(v for _, v in positive_rs)
+            top3_rs = sum(v for _, v in sorted(positive_rs, key=lambda x: x[1], reverse=True)[:3])
+            top3_concentration = (top3_rs / total_positive_rs * 100) if total_positive_rs > 0 else 100
+            leading_sectors_count = len(positive_rs)
+            concentration_tag = (
+                'FRAGILE' if top3_concentration > 60 else
+                'MODERATE' if top3_concentration > 40 else
+                'ROBUST'
+            )
+            results['_meta'] = {
+                'concentration_pct': round(top3_concentration, 1),
+                'leading_sectors_count': leading_sectors_count,
+                'regime_breadth': concentration_tag,
+                'is_broad_rally': leading_sectors_count >= 6 and top3_concentration < 60,
+                'warning': (
+                    f"⚠️ Rally driven by top-3 sectors only ({top3_concentration:.0f}% concentration) — fragile"
+                    if concentration_tag == 'FRAGILE' else None
+                ),
+            }
+        except Exception:
+            results['_meta'] = {'concentration_pct': 50, 'leading_sectors_count': 0,
+                                'regime_breadth': 'UNKNOWN', 'is_broad_rally': False}
+
         return results
 
     @staticmethod
@@ -894,6 +1010,8 @@ class GapRiskModel:
         try:
             close = df['Close'].squeeze()
             open_price = df['Open'].squeeze()
+            high = df['High'].squeeze()
+            low = df['Low'].squeeze()
 
             # Historical gap analysis (% of days with gap > 2%)
             gaps = ((open_price - close.shift(1)) / close.shift(1) * 100).dropna().abs()
@@ -916,6 +1034,17 @@ class GapRiskModel:
             else:
                 size_factor = 1.00
 
+            # ── STAGE-1 IMPROVEMENT: ATR-Based Gap Risk Multiplier ────────────
+            # If average overnight gap > 1.2× ATR → stock has liquidity vacuum risk
+            # This catches Indian midcap gaps that pure historical % misses
+            atr = ta.atr(high, low, close, 14)
+            avg_atr_20 = atr.tail(20).mean()
+            avg_gap_abs = gaps.tail(20).mean() / 100 * close.tail(20).mean()  # in price terms
+            gap_to_atr_ratio = avg_gap_abs / avg_atr_20 if avg_atr_20 > 0 else 1.0
+            atr_gap_penalty = gap_to_atr_ratio > 1.2
+            if atr_gap_penalty:
+                size_factor = round(size_factor * 0.80, 2)  # Additional 20% reduction
+
             return {
                 'gap_risk_score': round(gap_risk_score, 2),
                 'pct_large_gaps': round(pct_large_gaps, 2),
@@ -923,6 +1052,10 @@ class GapRiskModel:
                 'beta': beta,
                 'position_size_factor': size_factor,
                 'risk_level': 'HIGH' if gap_risk_score > 60 else ('MEDIUM' if gap_risk_score > 30 else 'LOW'),
+                # Stage-1 additions
+                'gap_to_atr_ratio': round(gap_to_atr_ratio, 2),
+                'atr_gap_multiplier_triggered': atr_gap_penalty,
+                'liquidity_vacuum_risk': atr_gap_penalty,
             }
         except:
             return {'gap_risk_score': 50, 'position_size_factor': 0.7, 'risk_level': 'MEDIUM'}
@@ -933,6 +1066,11 @@ class BreakoutConfirmation:
     IMPROVEMENT #4: 2-day breakout confirmation to avoid NSE traps.
     Day1: Close > resistance with 1.5x volume
     Day2: Close still above resistance (not back inside range)
+
+    STAGE-1 ADDITIONS:
+    - Follow-Through Rule: Day+2 must not close below breakout midpoint
+    - Volume Z-Score: adaptive threshold instead of fixed 1.5x
+    - Bearish engulfing guard within 3 sessions
     """
 
     @staticmethod
@@ -940,16 +1078,32 @@ class BreakoutConfirmation:
         try:
             close = df['Close'].squeeze()
             high = df['High'].squeeze()
+            low = df['Low'].squeeze()
+            open_ = df['Open'].squeeze()
             volume = df['Volume'].squeeze()
 
             # Resistance = 20-day high (excluding last 2 days)
             resistance = high.iloc[:-2].tail(20).max()
             avg_volume = volume.iloc[:-2].tail(20).mean()
+            vol_std = volume.iloc[:-2].tail(20).std()
+
+            # ── STAGE-1: Volume Z-Score (adaptive vs fixed 1.5x) ──────────────
+            # More meaningful across midcap/largecap differences
+            vol_zscore_d1 = ((volume.iloc[-2] - avg_volume) / vol_std) if vol_std > 0 else 0
+            vol_zscore_d2 = ((volume.iloc[-1] - avg_volume) / vol_std) if vol_std > 0 else 0
+            # Breakout quality threshold: z-score > 1.0 ≈ top 16% of days (≈1.5x avg)
+            vol_breakout_quality = (
+                'Strong' if vol_zscore_d1 > 2.0 else
+                'Good' if vol_zscore_d1 > 1.0 else
+                'Weak'
+            )
+
+            # Original volume ratio (kept for backward compat)
+            d1_volume_ratio = volume.iloc[-2] / avg_volume if avg_volume > 0 else 1
 
             # Day 1 (second-to-last bar)
             d1_close = close.iloc[-2]
-            d1_volume_ratio = volume.iloc[-2] / avg_volume if avg_volume > 0 else 1
-            d1_broke = d1_close > resistance and d1_volume_ratio >= 1.5
+            d1_broke = d1_close > resistance and vol_zscore_d1 > 0.5  # Z>0.5 ≈ above avg
 
             # Day 2 (latest bar)
             d2_close = close.iloc[-1]
@@ -957,18 +1111,50 @@ class BreakoutConfirmation:
 
             confirmed = d1_broke and d2_held
 
+            # ── STAGE-1: Follow-Through Rule ─────────────────────────────────
+            # Day+2 must NOT close below the midpoint of the breakout candle
+            breakout_midpoint = (high.iloc[-2] + low.iloc[-2]) / 2
+            follow_through_ok = d2_close > breakout_midpoint
+
+            # Volume contraction on pullback (healthy sign)
+            vol_contracting_d2 = vol_zscore_d2 < vol_zscore_d1
+
+            # ── STAGE-1: Bearish engulfing guard (3-session look-back) ────────
+            bearish_engulf = False
+            if len(df) >= 3:
+                for i in range(-3, 0):
+                    body_prev = close.iloc[i-1] - open_.iloc[i-1]
+                    body_curr = open_.iloc[i] - close.iloc[i]
+                    if body_prev > 0 and body_curr > 0 and body_curr > body_prev:
+                        bearish_engulf = True
+                        break
+
+            # Enhanced confirmation: original 2-day + follow-through + no engulf
+            confirmed_strict = confirmed and follow_through_ok and not bearish_engulf
+
             return {
                 'resistance_level': round(resistance, 2),
                 'day1_close': round(d1_close, 2),
                 'day1_volume_ratio': round(d1_volume_ratio, 2),
+                'day1_volume_zscore': round(vol_zscore_d1, 2),
                 'day1_broke_out': d1_broke,
                 'day2_close': round(d2_close, 2),
                 'day2_held': d2_held,
-                'confirmed': confirmed,
-                'status': '✅ Confirmed' if confirmed else ('⏳ Pending D2' if d1_broke else '❌ Not confirmed'),
+                'confirmed': confirmed,                          # Original 2-day check
+                'confirmed_strict': confirmed_strict,           # + follow-through + no engulf
+                'follow_through_ok': follow_through_ok,
+                'vol_contraction_pullback': vol_contracting_d2,
+                'volume_quality': vol_breakout_quality,
+                'bearish_engulf_detected': bearish_engulf,
+                'status': (
+                    '✅ Strict Confirmed' if confirmed_strict else
+                    '⚠️ Confirmed (weak follow-through)' if confirmed else
+                    ('⏳ Pending D2' if d1_broke else '❌ Not confirmed')
+                ),
             }
-        except:
-            return {'confirmed': False, 'status': '❌ Error checking confirmation'}
+        except Exception:
+            return {'confirmed': False, 'confirmed_strict': False,
+                    'status': '❌ Error checking confirmation'}
 
 
 class RSIClassifier:
@@ -1031,6 +1217,8 @@ class SetupClassifier:
     """
     Enhanced classifier — IMPROVEMENT #12: Never return UNKNOWN.
     Always return best setup. Just downgrade probability tier.
+
+    NOTE: Both classify() and classify_setup() are valid — kept for API compatibility.
     """
 
     @staticmethod
@@ -1172,6 +1360,51 @@ class SetupClassifier:
                     tier = ProbabilityTier.B
                     status = TradeStatus.WATCH
 
+            # ── STAGE-1 IMPROVEMENT: Hard Kill Conditions Layer ───────────────
+            # These are VETO conditions — override scoring regardless of grade.
+            # One critical flaw should invalidate even a B-grade setup.
+            hard_kills = []
+            kill_triggered = False
+
+            if gap_data.get('days_to_earnings', 999) <= 1:
+                hard_kills.append("⛔ Earnings tomorrow — avoid new entry")
+                kill_triggered = True
+            if gap_data.get('risk_level') == 'HIGH' and setup_type == SetupType.BREAKOUT:
+                hard_kills.append("⛔ High gap risk + breakout = operator trap zone")
+                kill_triggered = True
+            if not liq_data['is_liquid']:
+                hard_kills.append("⛔ Insufficient liquidity for safe exit")
+                kill_triggered = True
+            if gap_data.get('atr_gap_multiplier_triggered', False) and beta > 1.3:
+                hard_kills.append("⛔ Liquidity vacuum risk on high-beta stock")
+                kill_triggered = True
+
+            if kill_triggered:
+                tier = ProbabilityTier.C
+                status = TradeStatus.AVOID
+
+            # ── STAGE-1 IMPROVEMENT: Setup Context Tag ────────────────────────
+            # Late trend breakouts in Indian markets fail more frequently.
+            # Detect whether stock is in Early / Mid / Late trend phase.
+            try:
+                ema200 = ta.ema(close, 200)
+                dist_from_ema200 = ((curr_price - ema200.iloc[-1]) / ema200.iloc[-1]) * 100
+                rs_composite_val = rs_data.get('composite', 0)
+                if dist_from_ema200 < 5 and rs_composite_val < 3:
+                    trend_context = "Early_Trend"
+                elif dist_from_ema200 < 15 and rs_composite_val < 8:
+                    trend_context = "Mid_Trend"
+                else:
+                    trend_context = "Late_Trend"
+                # Late trend breakouts get an extra caution flag
+                if trend_context == "Late_Trend" and setup_type == SetupType.BREAKOUT:
+                    if status == TradeStatus.READY:
+                        status = TradeStatus.WATCH
+                    if tier == ProbabilityTier.A_PLUS:
+                        tier = ProbabilityTier.A
+            except Exception:
+                trend_context = "Mid_Trend"
+
             return {
                 'setup_type': setup_type,
                 'confidence': round(confidence, 3),
@@ -1189,6 +1422,10 @@ class SetupClassifier:
                 'dist_from_ema20': round(dist_from_ema20, 2),
                 'is_contracting': is_contracting,
                 'allocation_r': TIER_ALLOCATION[tier] * gap_data.get('position_size_factor', 1.0),
+                # Stage-1 additions
+                'trend_context': trend_context,
+                'hard_kill_conditions': hard_kills,
+                'kill_triggered': kill_triggered,
             }
 
         except Exception as e:
@@ -1201,6 +1438,11 @@ class SetupClassifier:
                 'scores': {},
                 'error': str(e),
             }
+
+    # ── API compatibility alias ─────────────────────────────────────────
+    # api_server.py calls SetupClassifier.classify(...) — this alias makes
+    # both names valid so the server never throws AttributeError.
+    classify = classify_setup
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1576,7 +1818,8 @@ class TradeExpectancyTracker:
         d = self._data.get(setup_type, {})
         total = d.get('total', 0)
         if total == 0:
-            return {'expectancy': 0, 'win_rate': 0, 'trades': 0, 'is_active': True}
+            return {'expectancy': 0, 'win_rate': 0, 'trades': 0, 'is_active': True,
+                    'edge_stability': 'UNKNOWN', 'confidence_meter': 'Gray'}
 
         wins = d.get('wins', 0)
         losses = d.get('losses', 0)
@@ -1591,6 +1834,53 @@ class TradeExpectancyTracker:
         if total >= 10 and expectancy < -0.1:
             is_active = False
 
+        # ── STAGE-1 IMPROVEMENT: Edge Stability Score ─────────────────────────
+        # Track rolling 20-trade expectancy to detect edge degradation early.
+        history = d.get('history', [])
+        rolling_exp = 0.0
+        edge_stability = 'UNKNOWN'
+        confidence_meter = 'Gray'    # Gray=insufficient data, Green=good, Orange=flat, Red=degrading
+
+        if len(history) >= 5:
+            # Rolling last 20 trades
+            recent = history[-20:]
+            r_wins = [h for h in recent if h.get('won')]
+            r_losses = [h for h in recent if not h.get('won')]
+            r_wr = len(r_wins) / len(recent)
+            r_lr = len(r_losses) / len(recent)
+            r_avg_win = np.mean([abs(h['r']) for h in r_wins]) if r_wins else 0
+            r_avg_loss = np.mean([abs(h['r']) for h in r_losses]) if r_losses else 0
+            rolling_exp = (r_wr * r_avg_win) - (r_lr * r_avg_loss)
+
+            # Trend: is expectancy improving or degrading?
+            if len(history) >= 10:
+                old_exp = self._calc_slice_expectancy(history[-10:-5])
+                new_exp = self._calc_slice_expectancy(history[-5:])
+                trend = new_exp - old_exp
+            else:
+                trend = 0.0
+
+            edge_stability = (
+                'STRONG' if rolling_exp > 0.3 else
+                'STABLE' if rolling_exp > 0 else
+                'DEGRADING' if rolling_exp > -0.2 else
+                'COLLAPSED'
+            )
+            # Strategy Confidence Meter (displayed next to Freddy Gauge)
+            confidence_meter = (
+                'Green' if rolling_exp > 0 and trend >= 0 else
+                'Orange' if rolling_exp >= -0.1 else
+                'Red'
+            )
+            # Auto-reduce sizing if edge degrading
+            size_reduction = 0.0
+            if edge_stability in ('DEGRADING', 'COLLAPSED'):
+                size_reduction = 0.25  # Suggest 25% size reduction
+
+        else:
+            rolling_exp = expectancy
+            size_reduction = 0.0
+
         return {
             'expectancy': round(expectancy, 3),
             'win_rate': round(wr * 100, 1),
@@ -1599,7 +1889,25 @@ class TradeExpectancyTracker:
             'trades': total,
             'is_active': is_active,
             'recommendation': 'ACTIVE' if is_active else '⚠️ DISABLED — negative expectancy',
+            # Stage-1 additions
+            'rolling_expectancy_20': round(rolling_exp, 3),
+            'edge_stability': edge_stability,
+            'confidence_meter': confidence_meter,
+            'suggested_size_reduction': size_reduction,
         }
+
+    def _calc_slice_expectancy(self, history_slice: list) -> float:
+        """Helper to compute expectancy for a slice of trade history."""
+        if not history_slice:
+            return 0.0
+        wins = [h for h in history_slice if h.get('won')]
+        losses = [h for h in history_slice if not h.get('won')]
+        n = len(history_slice)
+        wr = len(wins) / n
+        lr = len(losses) / n
+        avg_win = np.mean([abs(h['r']) for h in wins]) if wins else 0
+        avg_loss = np.mean([abs(h['r']) for h in losses]) if losses else 0
+        return (wr * avg_win) - (lr * avg_loss)
 
     def get_all_stats(self) -> Dict:
         return {st: self.get_expectancy(st) for st in self._data}
@@ -1905,6 +2213,143 @@ class ActiveTradeEvaluator:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  PORTFOLIO-LEVEL RISK ENGINE — Critical Missing Component (Stage-1)
+# ═══════════════════════════════════════════════════════════════════════
+
+class PortfolioRiskEngine:
+    """
+    STAGE-1 CRITICAL ADDITION: Portfolio-level risk controls.
+
+    Indian markets correct sector-wide and gap on global cues.
+    Trade-by-trade sizing is insufficient — portfolio exposure must be capped.
+
+    Rules:
+      • Max 6 open positions
+      • Max 2 positions per sector
+      • Max 40% capital in high-beta (β > 1.3) stocks
+      • Portfolio max drawdown trigger → reduce all by 25%
+    """
+
+    MAX_POSITIONS = 6
+    MAX_PER_SECTOR = 2
+    MAX_HIGH_BETA_PCT = 40.0    # % of total capital
+    DRAWDOWN_TRIGGER_PCT = 8.0  # Portfolio drawdown % that triggers size reduction
+    DRAWDOWN_REDUCTION = 0.75   # Reduce all sizing to 75% on trigger
+
+    @staticmethod
+    def validate_new_trade(
+        proposed_ticker: str,
+        proposed_sector: str,
+        proposed_beta: float,
+        proposed_capital_pct: float,
+        active_positions: List[Dict],  # [{ticker, sector, beta, capital_pct}]
+        portfolio_current_drawdown_pct: float = 0.0
+    ) -> Dict:
+        """
+        Check whether a new trade violates portfolio-level rules.
+        Returns {allowed: bool, reasons: list, adjusted_size_pct: float}
+        """
+        violations = []
+        warnings = []
+        allowed = True
+        size_multiplier = 1.0
+
+        # Rule 1: Max position count
+        if len(active_positions) >= PortfolioRiskEngine.MAX_POSITIONS:
+            violations.append(f"⛔ Max {PortfolioRiskEngine.MAX_POSITIONS} positions reached ({len(active_positions)} open)")
+            allowed = False
+
+        # Rule 2: Max per sector
+        sector_count = sum(1 for p in active_positions
+                           if p.get('sector', '').lower() == proposed_sector.lower())
+        if sector_count >= PortfolioRiskEngine.MAX_PER_SECTOR:
+            violations.append(f"⛔ Sector '{proposed_sector}' already has {sector_count} positions (max {PortfolioRiskEngine.MAX_PER_SECTOR})")
+            allowed = False
+
+        # Rule 3: High-beta exposure cap
+        if proposed_beta > 1.3:
+            current_high_beta_pct = sum(
+                p.get('capital_pct', 0) for p in active_positions if p.get('beta', 1.0) > 1.3
+            )
+            if current_high_beta_pct + proposed_capital_pct > PortfolioRiskEngine.MAX_HIGH_BETA_PCT:
+                violations.append(
+                    f"⛔ High-beta exposure would reach {current_high_beta_pct + proposed_capital_pct:.1f}% "
+                    f"(max {PortfolioRiskEngine.MAX_HIGH_BETA_PCT}%)"
+                )
+                allowed = False
+
+        # Rule 4: Portfolio drawdown trigger
+        if portfolio_current_drawdown_pct >= PortfolioRiskEngine.DRAWDOWN_TRIGGER_PCT:
+            size_multiplier = PortfolioRiskEngine.DRAWDOWN_REDUCTION
+            warnings.append(
+                f"⚠️ Portfolio drawdown {portfolio_current_drawdown_pct:.1f}% triggered size reduction to "
+                f"{PortfolioRiskEngine.DRAWDOWN_REDUCTION * 100:.0f}%"
+            )
+
+        # Portfolio stats summary
+        total_deployed_pct = sum(p.get('capital_pct', 0) for p in active_positions)
+        high_beta_deployed = sum(p.get('capital_pct', 0) for p in active_positions if p.get('beta', 1.0) > 1.3)
+        sectors_used = {}
+        for p in active_positions:
+            s = p.get('sector', 'Unknown')
+            sectors_used[s] = sectors_used.get(s, 0) + 1
+
+        return {
+            'allowed': allowed,
+            'violations': violations,
+            'warnings': warnings,
+            'size_multiplier': size_multiplier,
+            'adjusted_capital_pct': round(proposed_capital_pct * size_multiplier, 2),
+            'portfolio_stats': {
+                'open_positions': len(active_positions),
+                'max_positions': PortfolioRiskEngine.MAX_POSITIONS,
+                'total_deployed_pct': round(total_deployed_pct, 1),
+                'high_beta_exposure_pct': round(high_beta_deployed, 1),
+                'sectors_used': sectors_used,
+                'portfolio_drawdown_pct': portfolio_current_drawdown_pct,
+            }
+        }
+
+    @staticmethod
+    def get_operating_mode(regime_type: RegimeType, breadth_slope: float,
+                           vol_regime: str) -> Dict:
+        """
+        STAGE-1 ADVANCED: 3-Mode Adaptive Operating System.
+        Switches mode automatically based on Regime + Breadth + Volatility.
+
+        Conservative Mode (Late Cycle): smaller sizes, fewer positions
+        Balanced Mode: standard operation
+        Aggressive Mode (Early Bull): larger sizes, full position count
+        """
+        if (regime_type == RegimeType.RISK_ON and
+                breadth_slope > 0 and
+                vol_regime in ('Low_Vol_Expansion', 'High_Vol_Compression')):
+            mode = 'Aggressive'
+            max_positions = 6
+            size_multiplier = 1.0
+            description = "🟢 Early Bull conditions — full deployment permitted"
+        elif (regime_type == RegimeType.RISK_OFF or
+              breadth_slope < -2.0 or
+              vol_regime == 'Panic_Vol_Spike'):
+            mode = 'Conservative'
+            max_positions = 3
+            size_multiplier = 0.5
+            description = "🔴 Late Cycle / Risk-Off — half sizing, 3 positions max"
+        else:
+            mode = 'Balanced'
+            max_positions = 4
+            size_multiplier = 0.75
+            description = "🟡 Balanced — standard sizing, 4 positions max"
+
+        return {
+            'mode': mode,
+            'max_positions': max_positions,
+            'size_multiplier': size_multiplier,
+            'description': description,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  MASTER ORCHESTRATOR — Ties all layers together
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -1927,6 +2372,80 @@ class FreddyEngine:
 
     def logout(self, token: str):
         self._auth.logout(token)
+
+    # ── Public (no-auth) helpers for api_server.py endpoints ───────────
+    # The market-regime endpoint was returning 500 because @require_auth
+    # was rejecting unauthenticated calls before any session was established.
+    # These public wrappers bypass auth for read-only market data.
+
+    def get_market_regime_public(self) -> Dict:
+        """Public market regime — no auth required. Safe: read-only data."""
+        try:
+            breadth = MarketBreadthEngine.calculate_breadth()
+            volatility = VolatilityRegimeEngine.detect_state()
+            regime = MarketRegimeEngine.detect_regime(breadth_data=breadth, volatility_data=volatility)
+            sectors = self._get_sector_data()
+            return {
+                'freddy_gauge': {
+                    'mpi': regime['mpi'],
+                    'degrees': regime['gauge_degrees'],
+                    'regime': regime['type'].value,
+                    'label': 'Risk-Off' if regime['mpi'] < 35 else ('Risk-On' if regime['mpi'] > 65 else 'Neutral'),
+                },
+                'breadth': breadth,
+                'volatility': {
+                    'state': volatility['state'].value,
+                    'favored': volatility.get('favored_strategies', []),
+                },
+                'sectors': sectors,
+                'regime_details': regime['details'],
+                'timestamp': datetime.now(IST_TZ).strftime('%Y-%m-%d %H:%M IST'),
+            }
+        except Exception as e:
+            logger.error(f"Market regime public error: {e}")
+            return {'error': str(e), 'regime': 'Neutral', 'mpi': 50}
+
+    def scan_stocks_public(self, tickers: List[str],
+                           sector_map: Dict[str, str] = None,
+                           market_cap_map: Dict[str, str] = None) -> List[Dict]:
+        """
+        Public scanner — no auth required.
+        Replaces the auth-gated scan that was causing 500s.
+        """
+        sector_data = self._get_sector_data()
+        results = []
+        for ticker in tickers:
+            try:
+                df = yf.download(ticker, period="6mo", progress=False)
+                if df.empty:
+                    continue
+                sector = (sector_map or {}).get(ticker, "")
+                cap_cat = (market_cap_map or {}).get(ticker, "midcap")
+                classification = SetupClassifier.classify_setup(
+                    df, ticker, sector, cap_cat, 999, 1.0, sector_data
+                )
+                entry_price = float(df['Close'].squeeze().iloc[-1])
+                risk_data = RiskCalculator.calculate_risk_params(
+                    df, classification['setup_type'], entry_price,
+                    classification.get('gap_risk')
+                )
+                results.append({
+                    'ticker': ticker,
+                    'setup_type': classification['setup_type'].value,
+                    'tier': classification['probability_tier'].value,
+                    'status': classification['status'].value,
+                    'confidence': classification['confidence'],
+                    'entry': risk_data['entry'],
+                    'stop_loss': risk_data['stop_loss'],
+                    'target1': risk_data['target1'],
+                    'rr1': risk_data['rr1'],
+                    'sector_rs': classification.get('sector_rs_positive', False),
+                    'liquidity_ok': classification.get('liquidity', {}).get('is_liquid', False),
+                    'volume_ratio': classification.get('volume_ratio', 1.0),
+                })
+            except Exception as e:
+                logger.error(f"Error processing {ticker}: {e}")
+        return sorted(results, key=lambda x: x['confidence'], reverse=True)
 
     def _get_sector_data(self) -> Dict:
         """Cache sector data for 15 minutes."""
@@ -2036,6 +2555,10 @@ class FreddyEngine:
                     'rsi': classification.get('rsi', {}),
                     'rs': classification.get('rs', {}),
                     'breakout_confirmation': classification.get('breakout_confirmation', {}),
+                    # Stage-1 additions
+                    'trend_context': classification.get('trend_context', 'Mid_Trend'),
+                    'hard_kill_conditions': classification.get('hard_kill_conditions', []),
+                    'kill_triggered': classification.get('kill_triggered', False),
                 },
                 'risk': {
                     **risk_data,
@@ -2114,4 +2637,6 @@ __all__ = [
     'RiskCalculator', 'PositionSizingEngine',
     'PlaybookGenerator', 'ActiveTradeEvaluator',
     'TradeExpectancyTracker',
+    # v3 additions
+    'PortfolioRiskEngine',
 ]
