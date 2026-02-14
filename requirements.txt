@@ -11,7 +11,8 @@ gunicorn==21.2.0
 yfinance==0.2.37
 pandas==2.2.2
 numpy==1.26.4
-pandas-ta==0.3.14b0
+# pandas-ta: do NOT pin to beta version string — install latest stable
+pandas-ta
 
 # Timezone
 pytz==2024.1
