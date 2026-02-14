@@ -10,7 +10,7 @@ gunicorn==21.2.0
 # Data & finance
 yfinance==0.2.37
 pandas==2.2.2
-numpy==1.26.4
+numpy>=2.2.6
 # pandas-ta: do NOT pin to beta version string — install latest stable
 pandas-ta
 
