@@ -1,7 +1,21 @@
-Flask==3.0.0
-flask-cors==4.0.0
-pandas
-yfinance
-pandas-ta
-pytz
+# ─────────────────────────────────────────────────────────
+#  FREDDY EVOLUTION ENGINE v3 — Render Backend Requirements
+# ─────────────────────────────────────────────────────────
+
+# Web server
+flask==3.0.3
+flask-cors==4.0.1
 gunicorn==21.2.0
+
+# Data & finance
+yfinance==0.2.37
+pandas==2.2.2
+numpy==1.26.4
+pandas-ta==0.3.14b0
+
+# Timezone
+pytz==2024.1
+
+# HTTP (yfinance dependency, pin for stability)
+requests==2.32.3
+urllib3==2.2.1
