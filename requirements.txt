@@ -12,13 +12,13 @@ gunicorn==21.2.0
 
 # Data & finance
 yfinance==0.2.37
-pandas==1.5.3
-numpy==1.24.4
-pandas-ta==0.3.14b0
+pandas>=2.0.0
+numpy>=1.24.0
 
-# Timezone
+# Install pandas-ta directly from GitHub (Release branch)
+git+https://github.com/twopirllc/pandas-ta.git@development
+
+# Timezone & Utilities
 pytz==2024.1
-
-# HTTP (yfinance dependency, pin for stability)
 requests==2.32.3
 urllib3==2.2.1
