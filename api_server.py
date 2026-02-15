@@ -31,9 +31,34 @@ V4 CHANGES:
 
 import os
 import logging
+import json
+import numpy as np
 from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  NUMPY-SAFE JSON ENCODER
+#  Fixes: "Object of type bool/int64/float64 is not JSON serializable"
+#  numpy returns its own bool/int/float types — this converts them to plain
+#  Python types so Flask's jsonify() can handle them without crashing.
+# ═══════════════════════════════════════════════════════════════════════════
+
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, (np.int8, np.int16, np.int32, np.int64,
+                            np.uint8, np.uint16, np.uint32, np.uint64)):
+            return int(obj)
+        if isinstance(obj, (np.float16, np.float32, np.float64)):
+            if np.isnan(obj) or np.isinf(obj):
+                return None          # JSON has no NaN/Inf — return null
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 # ── Import the trading engine ──────────────────────────────────────────────
 from trading_engine_v4 import (
@@ -62,6 +87,7 @@ logging.basicConfig(
 logger = logging.getLogger("swingbull.api")
 
 app = Flask(__name__)
+app.json_encoder = NumpyEncoder          # ← use numpy-safe encoder globally
 
 # ── CORS: allow your frontend origins ─────────────────────────────────────
 ALLOWED_ORIGINS = [
