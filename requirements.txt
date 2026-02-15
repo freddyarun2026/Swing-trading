@@ -1,16 +1,17 @@
+# Web server
 flask==3.0.3
 flask-cors==4.0.1
 gunicorn==21.2.0
 
 # Data & finance
-yfinance==0.2.37
+yfinance>=0.2.37
 pandas>=2.0.0
 numpy>=1.24.0
 
-# FIX: Install directly from ZIP to avoid "device or address" git errors
-https://github.com/twopirllc/pandas-ta/archive/refs/heads/development.zip
+# Correct ZIP link for pandas-ta (Main branch)
+https://github.com/twopirllc/pandas-ta/archive/refs/heads/main.zip
 
 # Timezone & Utilities
-pytz==2024.1
-requests==2.32.3
-urllib3==2.2.1
+pytz>=2024.1
+requests>=2.32.3
+urllib3>=2.2.1
