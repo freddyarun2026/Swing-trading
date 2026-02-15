@@ -1,21 +1,32 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║   FREDDY API SERVER v3.0 — Flask Backend for Render                        ║
-║   Connects trading_engine_v3.py to the Netlify frontend                    ║
+║   SWING BULL TRADER API SERVER v4.0 — Flask Backend                         ║
+║   Architected by Freddy • For Cloudflare/Appwrite Deployment                ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 ENDPOINTS:
-  GET  /                          → health check
-  GET  /api/market-regime         → Freddy Gauge + breadth + sectors
-  POST /api/scan                  → stock scanner (body: {tickers: [...]} optional)
-  POST /api/analyse               → deep single-stock analysis (body: {ticker, sector, ...})
+  GET  /                          → health check + dashboard meta
+  GET  /api/market-regime         → Market Pulse (renamed) + breadth + sectors
+  POST /api/scan                  → stock scanner with portfolio blocks
+  POST /api/analyse               → deep single-stock analysis
   GET  /api/sectors               → sector RS rankings
   POST /api/portfolio/validate    → portfolio-level risk check
+  POST /api/portfolio/positions   → update active positions for constraint checks
   POST /api/trade/record          → record a completed trade result
   GET  /api/performance           → expectancy & edge stability stats
   POST /api/active-trade          → evaluate an open position health
   POST /api/login                 → get session token
   POST /api/logout                → end session
+  GET  /api/meta                  → dashboard branding & color palette
+
+V4 CHANGES:
+  ✅ Renamed "Freddy Gauge" → "Market Pulse"
+  ✅ Added Market Pulse zones (0-45° Red, 45-135° Yellow, 135-180° Green)
+  ✅ Portfolio hard blocks integrated
+  ✅ Trap detection in scan results
+  ✅ Intraday chase guard alerts
+  ✅ Dashboard meta with branding and color palette
+  ✅ UI-ready color hints in all responses
 """
 
 import os
@@ -25,8 +36,9 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 # ── Import the trading engine ──────────────────────────────────────────────
-from trading_engine_v3 import (
-    FreddyEngine,
+from trading_engine_v4 import (
+    SwingBullEngine,
+    FreddyEngine,  # Backward compat alias
     SetupClassifier,
     SetupType,
     PortfolioRiskEngine,
@@ -36,6 +48,7 @@ from trading_engine_v3 import (
     VolatilityRegimeEngine,
     SectorLeadershipEngine,
     RegimeType,
+    DASHBOARD_META,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -46,11 +59,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
-logger = logging.getLogger("freddy.api")
+logger = logging.getLogger("swingbull.api")
 
 app = Flask(__name__)
 
-# ── CORS: allow only your Netlify frontend ─────────────────────────────────
+# ── CORS: allow your frontend origins ─────────────────────────────────────
 ALLOWED_ORIGINS = [
     o.strip()
     for o in os.environ.get(
@@ -64,17 +77,17 @@ CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 
 # ── Engine: initialised once at startup ────────────────────────────────────
 TOTAL_CAPITAL    = float(os.environ.get("TOTAL_CAPITAL",    "1000000"))
-RISK_PER_TRADE   = float(os.environ.get("RISK_PER_TRADE",   "2.0"))   # % per trade
+RISK_PER_TRADE   = float(os.environ.get("RISK_PER_TRADE",   "2.0"))
 
-engine = FreddyEngine(
+engine = SwingBullEngine(
     total_capital=TOTAL_CAPITAL,
     risk_per_trade=RISK_PER_TRADE,
 )
-logger.info(f"FreddyEngine v3 initialised — capital ₹{TOTAL_CAPITAL:,.0f}, risk {RISK_PER_TRADE}%/trade")
+logger.info(f"SwingBullEngine v4 initialised — capital ₹{TOTAL_CAPITAL:,.0f}, risk {RISK_PER_TRADE}%/trade")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  STOCK UNIVERSE  (Nifty 50 default + sector mapping)
+#  STOCK UNIVERSE (Nifty 50 default + sector mapping)
 # ═══════════════════════════════════════════════════════════════════════════
 
 NIFTY50_TICKERS = [
@@ -130,7 +143,7 @@ TICKER_SECTOR = {
 }
 
 # Map ticker → market-cap category
-TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}   # All Nifty50 are largecap
+TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -139,7 +152,7 @@ TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}   # All Nifty50 are
 
 def _err(msg: str, code: int = 500):
     logger.error(msg)
-    return jsonify({"error": msg}), code
+    return jsonify({"error": msg, "dashboard_meta": DASHBOARD_META}), code
 
 
 def _resolve_tickers(body: dict) -> list:
@@ -147,7 +160,6 @@ def _resolve_tickers(body: dict) -> list:
     tickers = body.get("tickers", [])
     if not tickers or not isinstance(tickers, list):
         return NIFTY50_TICKERS
-    # Ensure .NS suffix for NSE tickers
     return [t if "." in t else f"{t}.NS" for t in tickers]
 
 
@@ -160,16 +172,27 @@ def _resolve_tickers(body: dict) -> list:
 def root():
     return jsonify({
         "status": "live",
-        "engine": "FreddyEngine v3",
+        "engine": "SwingBullEngine v4",
+        "name": DASHBOARD_META["branding"]["name"],
+        "tagline": DASHBOARD_META["branding"]["tagline"],
+        "version": DASHBOARD_META["version"],
         "timestamp": datetime.utcnow().isoformat() + "Z",
+        "dashboard_meta": DASHBOARD_META,
     })
 
 
-# ── Market Regime + Freddy Gauge ────────────────────────────────────────────
+# ── Dashboard Meta (branding, colors) ───────────────────────────────────────
+@app.route("/api/meta", methods=["GET"])
+def dashboard_meta():
+    """Returns branding, color palette, and UI configuration."""
+    return jsonify(DASHBOARD_META)
+
+
+# ── Market Regime + Market Pulse ────────────────────────────────────────────
 @app.route("/api/market-regime", methods=["GET"])
 def market_regime():
     """
-    Returns: Freddy Gauge (MPI, degrees, regime label),
+    Returns: Market Pulse (MPI, degrees, zone label),
              breadth data, volatility state, sector RS rankings.
     No authentication required — read-only market data.
     """
@@ -189,6 +212,7 @@ def scan():
       { "tickers": ["RELIANCE.NS", "TCS.NS", ...] }
 
     Returns list of setups sorted by confidence (best first).
+    Includes portfolio blocks and trap detection.
     No authentication required.
     """
     if request.method == "OPTIONS":
@@ -209,6 +233,7 @@ def scan():
             "count":   len(results),
             "scanned": len(tickers),
             "timestamp": datetime.utcnow().isoformat() + "Z",
+            "dashboard_meta": DASHBOARD_META,
         })
 
     except Exception as e:
@@ -230,101 +255,73 @@ def analyse():
         "auth_token":      "xxx"              (required for full auth path)
       }
 
-    Returns: full 6-layer analysis + playbook.
-    Falls back to classify_setup (no auth) if no token provided.
+    Returns full 7-layer analysis with portfolio constraints.
     """
     if request.method == "OPTIONS":
         return jsonify({}), 200
 
     try:
-        body    = request.get_json(silent=True) or {}
-        ticker  = body.get("ticker", "").strip()
+        body       = request.get_json(silent=True) or {}
+        ticker     = body.get("ticker", "").strip()
         if not ticker:
-            return _err("Missing 'ticker' in request body", 400)
+            return _err("Missing 'ticker'", 400)
 
-        ticker       = ticker if "." in ticker else f"{ticker}.NS"
-        sector       = body.get("sector", TICKER_SECTOR.get(ticker, ""))
-        cap_cat      = body.get("market_cap_cat", TICKER_MARKET_CAP.get(ticker, "midcap"))
-        days_earn    = int(body.get("days_to_earnings", 999))
-        beta         = float(body.get("beta", 1.0))
-        auth_token   = body.get("auth_token", "")
+        ticker = ticker if "." in ticker else f"{ticker}.NS"
+        sector = body.get("sector", TICKER_SECTOR.get(ticker, ""))
+        market_cap_cat = body.get("market_cap_cat", TICKER_MARKET_CAP.get(ticker, "midcap"))
+        days_to_earnings = int(body.get("days_to_earnings", 999))
+        beta = float(body.get("beta", 1.0))
+        auth_token = body.get("auth_token", "")
 
-        # Attempt authenticated full analysis; fall back to public scan
-        if auth_token:
-            result = engine.full_analysis(
-                ticker           = ticker,
-                sector           = sector,
-                market_cap_cat   = cap_cat,
-                days_to_earnings = days_earn,
-                beta             = beta,
-                auth_token       = auth_token,
-            )
-        else:
-            # Public-mode: return classification without auth gate
-            import yfinance as yf
-            import pandas_ta as ta
-            df = yf.download(ticker, period="6mo", progress=False)
-            if df.empty:
-                return _err(f"No market data for {ticker}", 404)
-
-            sector_data = engine._get_sector_data()
-            classification = SetupClassifier.classify_setup(
-                df, ticker, sector, cap_cat, days_earn, beta, sector_data
-            )
-            result = {
-                "ticker":     ticker,
-                "timestamp":  datetime.utcnow().isoformat() + "Z",
-                "mode":       "public (no auth)",
-                "setup_type": classification["setup_type"].value,
-                "tier":       classification["probability_tier"].value,
-                "status":     classification["status"].value,
-                "confidence": classification["confidence"],
-                "trend_context": classification.get("trend_context", "Mid_Trend"),
-                "hard_kill_conditions": classification.get("hard_kill_conditions", []),
-                "rsi":        classification.get("rsi", {}),
-                "rs":         classification.get("rs", {}),
-                "gap_risk":   classification.get("gap_risk", {}),
-                "liquidity":  classification.get("liquidity", {}),
-                "breakout_confirmation": classification.get("breakout_confirmation", {}),
-            }
+        result = engine.full_analysis(
+            ticker          = ticker,
+            sector          = sector,
+            market_cap_cat  = market_cap_cat,
+            days_to_earnings= days_to_earnings,
+            beta            = beta,
+            auth_token      = auth_token,
+        )
 
         return jsonify(result)
 
     except PermissionError as e:
         return _err(str(e), 401)
     except Exception as e:
-        logger.exception(f"analyse error for {body.get('ticker')}")
+        logger.exception("analyse error")
         return _err(str(e))
 
 
-# ── Sector Rankings ──────────────────────────────────────────────────────────
+# ── Sectors ─────────────────────────────────────────────────────────────────
 @app.route("/api/sectors", methods=["GET"])
 def sectors():
-    """Returns sector RS rankings with concentration index."""
+    """Returns sector RS rankings and concentration index."""
     try:
         data = SectorLeadershipEngine.analyze_sectors()
-        return jsonify({"sectors": data, "timestamp": datetime.utcnow().isoformat() + "Z"})
+        return jsonify({
+            "sectors": data,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "dashboard_meta": DASHBOARD_META,
+        })
     except Exception as e:
         logger.exception("sectors error")
         return _err(str(e))
 
 
-# ── Portfolio Risk Validator ─────────────────────────────────────────────────
+# ── Portfolio Validation ────────────────────────────────────────────────────
 @app.route("/api/portfolio/validate", methods=["POST", "OPTIONS"])
 def portfolio_validate():
     """
     Body:
       {
-        "proposed_ticker":    "TITAN.NS",
-        "proposed_sector":    "fmcg",
-        "proposed_beta":      0.9,
-        "proposed_capital_pct": 8.5,
-        "active_positions":   [
-          {"ticker":"RELIANCE.NS","sector":"energy","beta":1.1,"capital_pct":10},
-          {"ticker":"TCS.NS","sector":"it","beta":0.85,"capital_pct":9}
-        ],
-        "portfolio_drawdown_pct": 2.5
+        "proposed_ticker":     "RELIANCE.NS",
+        "proposed_sector":     "energy",
+        "proposed_beta":       1.1,
+        "proposed_capital_pct":15.0,
+        "active_positions":    [{ticker, sector, beta, capital_pct}, ...],
+        "portfolio_drawdown_pct": 0
       }
+
+    Returns: {allowed, block_reason, violations, warnings, operating_mode}
     """
     if request.method == "OPTIONS":
         return jsonify({}), 200
@@ -352,10 +349,45 @@ def portfolio_validate():
         )
 
         result["operating_mode"] = op_mode
+        result["dashboard_meta"] = DASHBOARD_META
         return jsonify(result)
 
     except Exception as e:
         logger.exception("portfolio/validate error")
+        return _err(str(e))
+
+
+# ── Update Active Positions ─────────────────────────────────────────────────
+@app.route("/api/portfolio/positions", methods=["POST", "OPTIONS"])
+def update_positions():
+    """
+    Body:
+      {
+        "positions": [
+          {"ticker": "RELIANCE.NS", "sector": "energy", "beta": 1.1, "capital_pct": 15.0},
+          ...
+        ]
+      }
+
+    Updates the engine's active positions for portfolio constraint checks.
+    """
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+
+    try:
+        body = request.get_json(silent=True) or {}
+        positions = body.get("positions", [])
+
+        engine.set_active_positions(positions)
+
+        return jsonify({
+            "message": "Positions updated",
+            "count": len(positions),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        })
+
+    except Exception as e:
+        logger.exception("portfolio/positions error")
         return _err(str(e))
 
 
@@ -391,7 +423,13 @@ def record_trade():
             won        = won,
             auth_token = auth_token,
         )
-        return jsonify({"recorded": True, "setup_type": setup_type, "r": r_result, "won": won})
+        return jsonify({
+            "recorded": True,
+            "setup_type": setup_type,
+            "r": r_result,
+            "won": won,
+            "dashboard_meta": DASHBOARD_META,
+        })
 
     except PermissionError as e:
         return _err(str(e), 401)
@@ -411,7 +449,11 @@ def performance():
     try:
         auth_token = request.args.get("auth_token", "")
         stats = engine.get_performance_stats(auth_token=auth_token)
-        return jsonify({"stats": stats, "timestamp": datetime.utcnow().isoformat() + "Z"})
+        return jsonify({
+            "stats": stats,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "dashboard_meta": DASHBOARD_META,
+        })
     except PermissionError as e:
         return _err(str(e), 401)
     except Exception as e:
@@ -467,6 +509,7 @@ def active_trade():
             setup_type  = setup_type,
             entry_date  = entry_date,
         )
+        result["dashboard_meta"] = DASHBOARD_META
         return jsonify(result)
 
     except Exception as e:
@@ -492,7 +535,11 @@ def login():
 
         token = engine.login(username, password, ip)
         if token:
-            return jsonify({"token": token, "message": "Login successful"})
+            return jsonify({
+                "token": token,
+                "message": "Login successful",
+                "dashboard_meta": DASHBOARD_META,
+            })
         return jsonify({"error": "Invalid credentials or IP blocked"}), 401
 
     except Exception as e:
@@ -522,19 +569,25 @@ def logout():
 
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({"error": "Endpoint not found", "available": [
-        "GET  /",
-        "GET  /api/market-regime",
-        "POST /api/scan",
-        "POST /api/analyse",
-        "GET  /api/sectors",
-        "POST /api/portfolio/validate",
-        "POST /api/trade/record",
-        "GET  /api/performance?auth_token=xxx",
-        "POST /api/active-trade",
-        "POST /api/login",
-        "POST /api/logout",
-    ]}), 404
+    return jsonify({
+        "error": "Endpoint not found",
+        "available": [
+            "GET  /",
+            "GET  /api/meta",
+            "GET  /api/market-regime",
+            "POST /api/scan",
+            "POST /api/analyse",
+            "GET  /api/sectors",
+            "POST /api/portfolio/validate",
+            "POST /api/portfolio/positions",
+            "POST /api/trade/record",
+            "GET  /api/performance?auth_token=xxx",
+            "POST /api/active-trade",
+            "POST /api/login",
+            "POST /api/logout",
+        ],
+        "dashboard_meta": DASHBOARD_META,
+    }), 404
 
 
 @app.errorhandler(405)
@@ -545,7 +598,10 @@ def method_not_allowed(e):
 @app.errorhandler(500)
 def internal_error(e):
     logger.exception("Unhandled 500")
-    return jsonify({"error": "Internal server error"}), 500
+    return jsonify({
+        "error": "Internal server error",
+        "dashboard_meta": DASHBOARD_META,
+    }), 500
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -555,5 +611,5 @@ def internal_error(e):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    logger.info(f"Starting Freddy API on port {port} | debug={debug}")
+    logger.info(f"Starting Swing Bull Trader API on port {port} | debug={debug}")
     app.run(host="0.0.0.0", port=port, debug=debug)
