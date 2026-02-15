@@ -8,9 +8,8 @@ yfinance>=0.2.37
 pandas>=2.0.0
 numpy>=1.24.0
 
-# pandas-ta via PyPI (GitHub repo was deleted - ZIP URL is permanently gone)
-# v0.3.14b0 is the last release supporting Python 3.11
-pandas-ta==0.3.14b0
+# pandas-ta from PyPI — requires Python 3.12+ (see runtime.txt)
+pandas-ta
 
 # Timezone & Utilities
 pytz>=2024.1
