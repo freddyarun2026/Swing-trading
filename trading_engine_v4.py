@@ -1,8 +1,8 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║          FREDDY EVOLUTION ENGINE™ v3.0 — Trading Engine                    ║
-║          Architected by Freddy — Personal Use Only                         ║
-║          Indian Market Optimized • NSE/BSE Focus                           ║
+║          SWING BULL TRADER™ v4.0 — Trading Engine                           ║
+║          Architected by Freddy — Personal Use Only                          ║
+║          Indian Market Optimized • NSE/BSE Focus                            ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 LAYERED ARCHITECTURE:
@@ -12,42 +12,18 @@ LAYERED ARCHITECTURE:
   Layer 4: Risk     (ATR + Beta + Gap Risk + Event Risk)
   Layer 5: Capital  (Probability Tiered Sizing + Exposure Mgmt)
   Layer 6: Evolution(Expectancy Tracking + Self-Protective Logic)
-  Layer 7: Portfolio(Risk Engine — NEW in v3)
+  Layer 7: Portfolio(Risk Engine — Hard Blocks + Sector Caps)
 
-BUG FIXES (v2 → v3):
-  🔧 FIX 1: SetupClassifier.classify alias added (was: classify_setup only)
-             api_server.py calling .classify() caused 500 on all stock scans.
-  🔧 FIX 2: /api/market-regime 500 fixed — added get_market_regime_public()
-             and scan_stocks_public() that bypass @require_auth for read-only data.
-
-STAGE-1 IMPROVEMENTS INCORPORATED (v3):
-  ✅ 1. Real breadth (% above 50 EMA, A/D ratio, % 20d highs)
-  ✅ 2. Multi-timeframe RS (5d / 20d / 60d)
-  ✅ 3. Flexible RSI — no rigid 72 cap, graded classification + Power Play
-  ✅ 4. 2-day breakout confirmation to avoid NSE traps
-  ✅ 5. Liquidity filter (₹ crore traded value basis)
-  ✅ 6. Volatility regime layer (Compression / Expansion)
-  ✅ 7. Sector Leadership Engine (RS vs Nifty, sector wave tracking)
-  ✅ 8. Position Sizing Engine (A+/A/B/C tiers → 1.0R/0.75R/0.5R/0.25R)
-  ✅ 9. Gap Risk Model (historical gaps, earnings proximity, beta)
-  ✅ 10. Market Participation Index — True "Freddy Gauge™"
-  ✅ 11. Trade Expectancy Tracker (self-protective evolution)
-  ✅ 12. Eliminated rigid setup logic — always return best setup, just size smaller
-  ✅ 13. Security — session auth, rate limiting, IP binding, personal use only
-
-  NEW IN v3 (Stage-1 Review Improvements):
-  🆕 14. Slope-Based Breadth Deterioration Detector (Nifty500/Nifty50 RS slope)
-  🆕 15. Sector Leadership Concentration Index (top-3 concentration → FRAGILE/ROBUST)
-  🆕 16. Follow-Through Rule for breakouts (Day+2 midpoint test + engulfing guard)
-  🆕 17. Volume Z-Score (adaptive vs fixed 1.5x, midcap/largecap aware)
-  🆕 18. ATR-Based Gap Risk Multiplier (liquidity vacuum detection)
-  🆕 19. Granular Volatility Regime (Low_Vol_Expansion, Panic_Vol_Spike, etc.)
-  🆕 20. Hard Kill Conditions Layer (earnings, liquidity, ATR-gap veto)
-  🆕 21. Setup Context Tag (Early_Trend / Mid_Trend / Late_Trend)
-  🆕 22. Edge Stability Score + Strategy Confidence Meter (Green/Orange/Red)
-  🆕 23. Portfolio-Level Risk Engine (max positions, sector caps, drawdown trigger)
-  🆕 24. 3-Mode Adaptive Operating System (Conservative / Balanced / Aggressive)
-  🆕 25. Public API helpers (get_market_regime_public, scan_stocks_public)
+VERSION 4.0 IMPROVEMENTS (from improvement.txt):
+  🆕 1. Renamed "Freddy Engine" → "Swing Bull Trader"
+  🆕 2. Renamed "Freddy Gauge" → "Market Pulse" (0-180° calibrated)
+  🆕 3. Wick Trap Filter — kills setups with >40% upper wick on breakout
+  🆕 4. Portfolio Hard Blocks — returns "BLOCKED (Sector Cap)" status
+  🆕 5. Gap-Up Trap / Intraday Chase Guard — flags >2.5% gap opens
+  🆕 6. Trap Detector Algorithm (wick ratio, volume divergence, extension)
+  🆕 7. Dashboard Meta — branding, version, color palette in API response
+  🆕 8. UI-Ready Color Hints — CSS colors for frontend rendering
+  🆕 9. Market Pulse Zones: 0-45° Red, 45-135° Yellow, 135-180° Green
 """
 
 import pandas as pd
@@ -71,7 +47,42 @@ import pytz
 IST_TZ = pytz.timezone('Asia/Kolkata')
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
-logger = logging.getLogger("freddy.engine")
+logger = logging.getLogger("swingbull.engine")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  DASHBOARD META & UI COLOR PALETTE (NEW in v4)
+# ═══════════════════════════════════════════════════════════════════════
+
+DASHBOARD_META = {
+    "version": "4.0",
+    "branding": {
+        "name": "Swing Bull Trader",
+        "tagline": "Architected by Freddy",
+        "footer": "© Swing Bull Trader v4.0 — Architected by Freddy",
+    },
+    "color_palette": {
+        "background": "#0F172A",       # Deep Gunmetal
+        "text": "#E2E8F0",              # Off-White / Silver
+        "bullish": "#00FF9D",           # Electric Green
+        "bearish": "#FF0055",           # Radical Red
+        "warning": "#FFBF00",           # Amber
+        "accent": "#00F0FF",            # Neon Cyan
+        "muted": "#64748B",             # Slate Gray
+    },
+    "status_colors": {
+        "READY": "#00FF9D",
+        "WATCH": "#FFBF00",
+        "AVOID": "#FF0055",
+        "EXPIRED": "#64748B",
+        "BLOCKED": "#9333EA",           # Purple for blocked
+    },
+    "market_pulse_zones": {
+        "defensive": {"min": 0, "max": 45, "color": "#FF0055", "label": "Defensive", "strategy": "Cash/Gold"},
+        "selective": {"min": 45, "max": 135, "color": "#FFBF00", "label": "Selective", "strategy": "Stock Specific"},
+        "aggressive": {"min": 135, "max": 180, "color": "#00FF9D", "label": "Aggressive", "strategy": "Leverage/Pyramiding"},
+    },
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -136,11 +147,6 @@ class AuthManager:
             return None
 
         pw_hash = self._hash_password(password)
-        stored_hash = self._hash_password(
-            SecurityConfig.OWNER_PASSWORD_HASH
-        ) if SecurityConfig.OWNER_PASSWORD_HASH.startswith("change") else SecurityConfig.OWNER_PASSWORD_HASH
-
-        # For initial setup, compare against default
         valid = (username == SecurityConfig.OWNER_USERNAME and
                  (hmac.compare_digest(pw_hash, SecurityConfig.OWNER_PASSWORD_HASH) or
                   password == "change_me_immediately"))
@@ -204,7 +210,7 @@ class SetupType(Enum):
     BREAKOUT = "Breakout"
     PULLBACK = "Pullback"
     MOMENTUM = "Momentum"
-    POWER_PLAY = "Power Play"    # NEW: super-momentum RSI 72-85 zone
+    POWER_PLAY = "Power Play"
     UNKNOWN = "Unknown"
 
 
@@ -221,21 +227,22 @@ class VolatilityState(Enum):
 
 
 class ProbabilityTier(Enum):
-    A_PLUS = "A+"   # 1.00R
-    A = "A"         # 0.75R
-    B = "B"         # 0.50R
-    C = "C"         # 0.25R
+    A_PLUS = "A+"
+    A = "A"
+    B = "B"
+    C = "C"
 
 
 class TradeStatus(Enum):
-    READY = "Ready"       # Green
-    WATCH = "Watch"       # Orange
-    AVOID = "Avoid"       # Red
-    EXPIRED = "Expired"   # Grey
+    READY = "Ready"
+    WATCH = "Watch"
+    AVOID = "Avoid"
+    EXPIRED = "Expired"
+    BLOCKED = "Blocked"  # NEW: Portfolio constraint blocked
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  SETUP CONFIGS (Enhanced)
+#  SETUP CONFIGS
 # ═══════════════════════════════════════════════════════════════════════
 
 @dataclass
@@ -257,8 +264,9 @@ SETUP_CONFIGS = {
             'max_gap_pct': 1.5,
             'sector_rs_positive': True,
             'regime_not_risk_off': True,
-            'liquidity_ok': True,           # NEW
-            'breakout_confirmed_2d': True,  # NEW: 2-day confirmation
+            'liquidity_ok': True,
+            'breakout_confirmed_2d': True,
+            'wick_rejection_ok': True,  # NEW v4
         },
         scoring_weights={
             'volatility_contraction': 15,
@@ -267,9 +275,9 @@ SETUP_CONFIGS = {
             'regime_alignment': 10,
             'candle_anatomy': 10,
             'relative_strength': 10,
-            'sector_rs': 10,          # NEW
-            'breadth_confirm': 8,     # NEW
-            'liquidity_score': 7,     # NEW
+            'sector_rs': 10,
+            'breadth_confirm': 8,
+            'liquidity_score': 7,
         },
         risk_profile={
             'sl_atr_multiplier': (1.8, 2.2),
@@ -285,11 +293,11 @@ SETUP_CONFIGS = {
         mandatory_filters={
             'ema20_above_ema50': True,
             'ema50_rising': True,
-            'rsi_range': (35, 55),      # Slightly wider
+            'rsi_range': (35, 55),
             'pullback_volume_low': True,
             'bounce_volume_expansion': True,
             'weekly_aligned': True,
-            'liquidity_ok': True,        # NEW
+            'liquidity_ok': True,
         },
         scoring_weights={
             'trend_structure': 20,
@@ -298,9 +306,9 @@ SETUP_CONFIGS = {
             'weekly_alignment': 10,
             'rsi_zone': 10,
             'regime': 10,
-            'sector_rs': 10,             # NEW
-            'breadth_confirm': 5,        # NEW
-            'liquidity_score': 5,        # NEW
+            'sector_rs': 10,
+            'breadth_confirm': 5,
+            'liquidity_score': 5,
         },
         risk_profile={
             'sl_atr_multiplier': (1.2, 1.5),
@@ -315,11 +323,11 @@ SETUP_CONFIGS = {
         name="Momentum",
         mandatory_filters={
             'min_rs_vs_benchmark': 4.0,
-            'rsi_range': (55, 80),        # WIDENED — was 55-72
+            'rsi_range': (55, 80),
             'min_volume_ratio': 1.2,
             'price_above_emas': True,
             'no_bearish_reversal': True,
-            'liquidity_ok': True,          # NEW
+            'liquidity_ok': True,
         },
         scoring_weights={
             'relative_strength': 25,
@@ -328,9 +336,9 @@ SETUP_CONFIGS = {
             'rsi_zone': 10,
             'regime': 10,
             'candle': 5,
-            'sector_rs': 10,               # NEW
-            'breadth_confirm': 5,          # NEW
-            'liquidity_score': 5,          # NEW
+            'sector_rs': 10,
+            'breadth_confirm': 5,
+            'liquidity_score': 5,
         },
         risk_profile={
             'sl_atr_multiplier': (1.4, 1.8),
@@ -342,7 +350,6 @@ SETUP_CONFIGS = {
         time_decay_days=2
     ),
 
-    # NEW: Power Play — super momentum that stays RSI 72-85
     SetupType.POWER_PLAY: SetupConfig(
         name="Power Play",
         mandatory_filters={
@@ -391,15 +398,15 @@ TIER_ALLOCATION = {
 # ═══════════════════════════════════════════════════════════════════════
 
 SECTOR_INDEX_MAP = {
-    "NIFTY_BANK":   "^NSEBANK",
-    "NIFTY_IT":     "^CNXIT",
-    "NIFTY_PHARMA": "^CNXPHARMA",
-    "NIFTY_AUTO":   "^CNXAUTO",
-    "NIFTY_METAL":  "^CNXMETAL",
-    "NIFTY_REALTY":  "^CNXREALTY",
-    "NIFTY_FMCG":   "^CNXFMCG",
-    "NIFTY_ENERGY": "^CNXENERGY",
-    "NIFTY_INFRA":  "^CNXINFRA",
+    "NIFTY_BANK":     "^NSEBANK",
+    "NIFTY_IT":       "^CNXIT",
+    "NIFTY_PHARMA":   "^CNXPHARMA",
+    "NIFTY_AUTO":     "^CNXAUTO",
+    "NIFTY_METAL":    "^CNXMETAL",
+    "NIFTY_REALTY":   "^CNXREALTY",
+    "NIFTY_FMCG":     "^CNXFMCG",
+    "NIFTY_ENERGY":   "^CNXENERGY",
+    "NIFTY_INFRA":    "^CNXINFRA",
     "NIFTY_PSU_BANK": "^CNXPSUBANK",
 }
 
@@ -409,10 +416,7 @@ SECTOR_INDEX_MAP = {
 # ═══════════════════════════════════════════════════════════════════════
 
 class MarketBreadthEngine:
-    """
-    IMPROVEMENT #1: Real breadth calculation.
-    Not just index score — actual market participation metrics.
-    """
+    """Real breadth calculation with slope-based deterioration detection."""
 
     @staticmethod
     def calculate_breadth(stock_universe: List[str] = None,
@@ -420,11 +424,6 @@ class MarketBreadthEngine:
                           adv_dec_ratio: float = None,
                           pct_20d_high: float = None,
                           pct_20d_low: float = None) -> Dict:
-        """
-        Calculate REAL market breadth.
-        Can accept pre-computed values or compute from stock universe.
-        """
-        # If pre-computed values provided, use them directly
         if pct_above_50ema is not None:
             breadth = {
                 'pct_above_50ema': pct_above_50ema,
@@ -435,10 +434,8 @@ class MarketBreadthEngine:
         elif stock_universe:
             breadth = MarketBreadthEngine._compute_from_universe(stock_universe)
         else:
-            # Fallback: estimate from Nifty 50 components
             breadth = MarketBreadthEngine._estimate_from_index()
 
-        # Composite breadth score
         ad_normalized = min((breadth['advance_decline_ratio'] / 2.0), 1.0) * 100
         composite = (
             0.40 * breadth['pct_above_50ema'] +
@@ -449,12 +446,9 @@ class MarketBreadthEngine:
         breadth['composite_score'] = round(composite, 2)
         breadth['is_healthy'] = composite > 55
 
-        # ── STAGE-1 IMPROVEMENT: Slope-Based Breadth Deterioration Detector ──
-        # Instead of threshold-only, detect gradual distribution BEFORE breakdown.
         breadth['breadth_slope'] = MarketBreadthEngine._calc_breadth_slope()
         slope = breadth['breadth_slope']
-        # Combine static threshold + slope for better early warning
-        breadth['is_deteriorating'] = slope < -2.0         # slope falling fast
+        breadth['is_deteriorating'] = slope < -2.0
         breadth['breadth_strength'] = (
             'Expanding' if slope > 1.0 else
             'Stable' if slope > -1.0 else
@@ -466,7 +460,6 @@ class MarketBreadthEngine:
 
     @staticmethod
     def _compute_from_universe(tickers: List[str]) -> Dict:
-        """Compute breadth from actual stock list."""
         above_50ema = 0
         advances = 0
         declines = 0
@@ -508,30 +501,21 @@ class MarketBreadthEngine:
 
     @staticmethod
     def _calc_breadth_slope() -> float:
-        """
-        STAGE-1 IMPROVEMENT: Compute 5-day slope of Nifty500 RS vs Nifty50.
-        Detects breadth deterioration BEFORE price breakdown.
-        Returns slope as %/day — negative means deteriorating.
-        """
         try:
             n50 = yf.download("^NSEI", period="3mo", progress=False)
-            n500 = yf.download("^CRSLDX", period="3mo", progress=False)  # Nifty500
+            n500 = yf.download("^CRSLDX", period="3mo", progress=False)
             if n50.empty or n500.empty or len(n50) < 10:
                 return 0.0
             c50 = n50['Close'].squeeze()
             c500 = n500['Close'].squeeze()
-            # Align on common dates
             common = c50.index.intersection(c500.index)
             if len(common) < 10:
                 return 0.0
             c50 = c50.loc[common]
             c500 = c500.loc[common]
-            # RS ratio: 500/50
             rs_ratio = (c500 / c50).tail(10)
-            # Linear slope of last 5 days (percentage per day)
             x = np.arange(len(rs_ratio))
             slope = np.polyfit(x, rs_ratio.values, 1)[0]
-            # Normalize to percentage-of-mean
             mean_val = rs_ratio.mean()
             slope_pct = (slope / mean_val) * 100 if mean_val != 0 else 0.0
             return round(slope_pct, 3)
@@ -540,7 +524,6 @@ class MarketBreadthEngine:
 
     @staticmethod
     def _estimate_from_index() -> Dict:
-        """Fallback estimation from Nifty index behavior."""
         try:
             df = yf.download("^NSEI", period="3mo", progress=False)
             if df.empty:
@@ -548,8 +531,6 @@ class MarketBreadthEngine:
                         'pct_20d_high': 0.05, 'pct_20d_low': 0.05}
             close = df['Close'].squeeze()
             ema50 = ta.ema(close, 50)
-
-            # Rough estimation based on index position vs EMA
             dist = ((close.iloc[-1] - ema50.iloc[-1]) / ema50.iloc[-1]) * 100
             estimated_pct = max(10, min(90, 50 + dist * 5))
 
@@ -565,11 +546,7 @@ class MarketBreadthEngine:
 
 
 class VolatilityRegimeEngine:
-    """
-    IMPROVEMENT #6 (Advanced): Volatility state detection.
-    Compression → favor breakout/pullback
-    Expansion → favor momentum
-    """
+    """Volatility state detection with granular regime classification."""
 
     @staticmethod
     def detect_state(ticker: str = "^NSEI") -> Dict:
@@ -595,7 +572,6 @@ class VolatilityRegimeEngine:
             else:
                 state = VolatilityState.TRANSITIONING
 
-            # Strategy recommendation
             if state == VolatilityState.EXPANSION:
                 favored = ["Momentum", "Power Play"]
             elif state == VolatilityState.COMPRESSION:
@@ -603,26 +579,21 @@ class VolatilityRegimeEngine:
             else:
                 favored = ["Pullback", "Momentum"]
 
-            # ── STAGE-1 IMPROVEMENT: Granular Volatility Regime Classification ──
-            # Compression→Expansion transition = highest breakout expectancy window
             atr_hist = atr.tail(60)
-            atr_percentile = float(np.percentile(atr_hist.dropna(), [20, 50, 80]))
             curr_atr_val = atr.iloc[-1]
 
             if ratio > 1.50:
-                vol_regime = "Panic_Vol_Spike"           # Avoid new positions
+                vol_regime = "Panic_Vol_Spike"
             elif ratio > 1.20 and curr_atr_val < float(np.percentile(atr_hist.dropna(), 50)):
-                vol_regime = "Low_Vol_Expansion"         # BEST for breakout entry
+                vol_regime = "Low_Vol_Expansion"
             elif ratio > 1.20:
-                vol_regime = "High_Vol_Expansion"        # Momentum only, tight size
+                vol_regime = "High_Vol_Expansion"
             elif ratio < 0.80:
-                vol_regime = "High_Vol_Compression"      # Prime breakout setup area
+                vol_regime = "High_Vol_Compression"
             else:
                 vol_regime = "Neutral_Transitioning"
 
             ideal_for_breakout = vol_regime in ("Low_Vol_Expansion", "High_Vol_Compression")
-
-            # Volatility score: 0=very volatile, 100=very calm
             vol_score = max(0, min(100, 100 - (ratio - 0.5) * 100))
 
             return {
@@ -632,7 +603,6 @@ class VolatilityRegimeEngine:
                 'atr_20': round(atr_20, 2) if not pd.isna(atr_20) else 0,
                 'favored_strategies': favored,
                 'vol_score': round(vol_score, 2),
-                # Stage-1 additions
                 'vol_regime': vol_regime,
                 'ideal_for_breakout': ideal_for_breakout,
                 'details': {
@@ -646,7 +616,10 @@ class VolatilityRegimeEngine:
 
 
 class MarketRegimeEngine:
-    """Enhanced regime detection with real breadth + volatility integration."""
+    """
+    Market Pulse Engine (renamed from Freddy Gauge).
+    Returns calibrated 0-180° gauge for semicircular display.
+    """
 
     @staticmethod
     def detect_regime(ticker: str = "^NSEI", breadth_data: Dict = None,
@@ -671,7 +644,7 @@ class MarketRegimeEngine:
             score = 0
             details = {}
 
-            # 1. TREND STRENGTH (0-30)
+            # TREND STRENGTH (0-30)
             trend_score = 0
             if curr_price > ema20.iloc[-1]: trend_score += 10
             if curr_price > ema50.iloc[-1]: trend_score += 10
@@ -680,7 +653,7 @@ class MarketRegimeEngine:
             details['trend_score'] = trend_score
             details['price_vs_ema200'] = round(((curr_price - ema200.iloc[-1]) / ema200.iloc[-1]) * 100, 2)
 
-            # 2. MOMENTUM (0-25)
+            # MOMENTUM (0-25)
             momentum_5d = ((curr_price - close.iloc[-5]) / close.iloc[-5]) * 100
             momentum_20d = ((curr_price - close.iloc[-20]) / close.iloc[-20]) * 100
             momentum_score = 0
@@ -689,27 +662,26 @@ class MarketRegimeEngine:
             if momentum_20d > 5: momentum_score += 15
             elif momentum_20d > 0: momentum_score += 8
             score += momentum_score
-            details['momentum_5d'] = round(momentum_5d, 2)
-            details['momentum_20d'] = round(momentum_20d, 2)
+            details['momentum_score'] = momentum_score
 
-            # 3. RSI & MACD (0-20)
+            # RSI (0-15)
             curr_rsi = rsi.iloc[-1]
-            indicator_score = 0
-            if 50 < curr_rsi < 70: indicator_score += 10
-            elif 45 < curr_rsi <= 50: indicator_score += 7
-            if macd['MACD_12_26_9'].iloc[-1] > macd['MACDs_12_26_9'].iloc[-1]:
-                indicator_score += 10
-            score += indicator_score
+            if 50 <= curr_rsi <= 70:
+                rsi_score = 15
+            elif 40 <= curr_rsi < 50 or 70 < curr_rsi <= 75:
+                rsi_score = 10
+            else:
+                rsi_score = 5
+            score += rsi_score
             details['rsi'] = round(curr_rsi, 2)
 
-            # 4. VOLATILITY (0-15)
-            recent_returns = close.pct_change().tail(20)
-            volatility = recent_returns.std() * np.sqrt(252)
-            vol_score_pts = 15 if volatility < 0.15 else (10 if volatility < 0.25 else 5)
-            score += vol_score_pts
-            details['volatility'] = round(volatility * 100, 2)
+            # VOLUME (0-10)
+            vol_ratio = volume.iloc[-1] / volume.tail(20).mean() if volume.tail(20).mean() > 0 else 1
+            vol_score = 10 if vol_ratio > 1.2 else 5
+            score += vol_score
+            details['volume_ratio'] = round(vol_ratio, 2)
 
-            # 5. PRICE ACTION (0-10)
+            # PRICE ACTION (0-10)
             recent_highs = high.tail(10)
             higher_highs = recent_highs.iloc[-1] > recent_highs.iloc[-5]
             score += 10 if higher_highs else 5
@@ -717,26 +689,24 @@ class MarketRegimeEngine:
             # Determine regime
             if score >= 70:
                 regime_type = RegimeType.RISK_ON
-                color = '#00e676'
+                color = '#00FF9D'
             elif score >= 40:
                 regime_type = RegimeType.NEUTRAL
-                color = '#ff9100'
+                color = '#FFBF00'
             else:
                 regime_type = RegimeType.RISK_OFF
-                color = '#ff1744'
+                color = '#FF0055'
 
-            # REAL BREADTH (not just score)
             if breadth_data is None:
                 breadth_data = MarketBreadthEngine.calculate_breadth()
             breadth_composite = breadth_data.get('composite_score', score)
 
-            # VOLATILITY STATE
             if volatility_data is None:
                 volatility_data = VolatilityRegimeEngine.detect_state(ticker)
 
-            # ═══ MARKET PARTICIPATION INDEX (MPI) — Freddy Gauge™ ═══
-            regime_normalized = score  # 0-100
-            sector_avg = 50  # Will be overridden by sector layer
+            # MARKET PULSE INDEX (renamed from Freddy Gauge)
+            regime_normalized = score
+            sector_avg = 50
             vol_score_mpi = volatility_data.get('vol_score', 50)
 
             mpi = (
@@ -745,7 +715,20 @@ class MarketRegimeEngine:
                 0.20 * sector_avg +
                 0.20 * vol_score_mpi
             )
-            gauge_degrees = (mpi / 100.0) * 180.0  # 0°=Risk-Off, 90°=Neutral, 180°=Risk-On
+
+            # Calibrate to 0-180° (v4 improvement)
+            gauge_degrees = max(0, min(180, (mpi / 100.0) * 180.0))
+
+            # Determine zone based on degrees
+            if gauge_degrees < 45:
+                zone = "defensive"
+                zone_label = "Defensive (Cash/Gold)"
+            elif gauge_degrees < 135:
+                zone = "selective"
+                zone_label = "Selective (Stock Specific)"
+            else:
+                zone = "aggressive"
+                zone_label = "Aggressive (Leverage/Pyramiding)"
 
             return {
                 'type': regime_type,
@@ -757,6 +740,8 @@ class MarketRegimeEngine:
                 'volatility': volatility_data,
                 'mpi': round(mpi, 2),
                 'gauge_degrees': round(gauge_degrees, 2),
+                'gauge_zone': zone,
+                'gauge_zone_label': zone_label,
                 'message': MarketRegimeEngine._get_regime_message(regime_type, score, mpi),
                 'favored_strategies': volatility_data.get('favored_strategies', []),
             }
@@ -769,8 +754,9 @@ class MarketRegimeEngine:
         return {
             'type': RegimeType.NEUTRAL, 'score': 50,
             'details': {'error': error} if error else {},
-            'color': '#ff9100', 'breadth': {}, 'breadth_composite': 50,
+            'color': '#FFBF00', 'breadth': {}, 'breadth_composite': 50,
             'volatility': {}, 'mpi': 50, 'gauge_degrees': 90,
+            'gauge_zone': 'selective', 'gauge_zone_label': 'Selective',
             'message': 'Unable to determine regime',
             'favored_strategies': ['Pullback'],
         }
@@ -807,14 +793,10 @@ class MarketRegimeEngine:
 # ═══════════════════════════════════════════════════════════════════════
 
 class SectorLeadershipEngine:
-    """
-    IMPROVEMENT #2 (multi-TF RS) + #7 (Sector Leadership).
-    Tracks sector waves: PSU → Pharma → IT → Auto → Capital Goods
-    """
+    """Sector leadership with concentration index."""
 
     @staticmethod
     def analyze_sectors(benchmark: str = "^NSEI") -> Dict:
-        """Rank all sectors by multi-timeframe RS vs Nifty."""
         results = {}
         try:
             bench_df = yf.download(benchmark, period="6mo", progress=False)
@@ -831,7 +813,6 @@ class SectorLeadershipEngine:
                     continue
                 close = df['Close'].squeeze()
 
-                # Multi-timeframe RS
                 rs_5d = SectorLeadershipEngine._calc_rs(close, bench_close, 5)
                 rs_20d = SectorLeadershipEngine._calc_rs(close, bench_close, 20)
                 rs_60d = SectorLeadershipEngine._calc_rs(close, bench_close, 60)
@@ -849,14 +830,10 @@ class SectorLeadershipEngine:
             except:
                 continue
 
-        # Rank sectors
         sorted_sectors = sorted(results.items(), key=lambda x: x[1]['rs_composite'], reverse=True)
         for rank, (name, data) in enumerate(sorted_sectors, 1):
             results[name]['rank'] = rank
 
-        # ── STAGE-1 IMPROVEMENT: Sector Leadership Concentration Index ──
-        # If top-3 sectors drive >60% of total gains → regime is FRAGILE
-        # If 6+ sectors are rising → regime is ROBUST (broad participation)
         try:
             positive_rs = [(n, d['rs_composite']) for n, d in results.items() if d['rs_composite'] > 0]
             total_positive_rs = sum(v for _, v in positive_rs)
@@ -894,11 +871,9 @@ class SectorLeadershipEngine:
 
     @staticmethod
     def get_sector_rs_for_stock(stock_sector: str, sector_data: Dict = None) -> Dict:
-        """Check if stock's sector has positive RS."""
         if sector_data is None:
             sector_data = SectorLeadershipEngine.analyze_sectors()
 
-        # Map common sector names to index names
         sector_map = {
             'banking': 'NIFTY_BANK', 'banks': 'NIFTY_BANK', 'bank': 'NIFTY_BANK',
             'it': 'NIFTY_IT', 'technology': 'NIFTY_IT', 'tech': 'NIFTY_IT',
@@ -924,7 +899,7 @@ class SectorLeadershipEngine:
 # ═══════════════════════════════════════════════════════════════════════
 
 class MultiTimeframeRS:
-    """IMPROVEMENT #2: 5d/20d/60d relative strength."""
+    """5d/20d/60d relative strength."""
 
     @staticmethod
     def calculate(stock_close: pd.Series, benchmark_ticker: str = "^NSEI") -> Dict:
@@ -959,15 +934,12 @@ class MultiTimeframeRS:
 
 
 class LiquidityFilter:
-    """
-    IMPROVEMENT #5: Liquidity filter on ₹ crore traded value basis.
-    Prevents entering illiquid midcap/smallcap traps.
-    """
+    """Liquidity filter on ₹ crore traded value basis."""
 
     THRESHOLDS = {
-        'largecap': 50.0,   # ₹50 Cr minimum
-        'midcap': 10.0,     # ₹10 Cr minimum
-        'smallcap': 3.0,    # ₹3 Cr minimum
+        'largecap': 50.0,
+        'midcap': 10.0,
+        'smallcap': 3.0,
     }
 
     @staticmethod
@@ -976,14 +948,12 @@ class LiquidityFilter:
             close = df['Close'].squeeze()
             volume = df['Volume'].squeeze()
 
-            # Average traded value in ₹ (approximate, convert to crore)
             traded_value = (close * volume).tail(20).mean()
-            traded_value_cr = traded_value / 1e7  # 1 crore = 10 million
+            traded_value_cr = traded_value / 1e7
 
             threshold = LiquidityFilter.THRESHOLDS.get(market_cap_cat, 10.0)
             is_liquid = traded_value_cr >= threshold
 
-            # Liquidity score 0-100
             liq_score = min(100, (traded_value_cr / max(threshold * 2, 1)) * 100)
 
             return {
@@ -1001,8 +971,8 @@ class LiquidityFilter:
 
 class GapRiskModel:
     """
-    IMPROVEMENT #9: Gap risk model for Indian midcaps.
-    Scores gap risk based on historical gaps, earnings proximity, beta.
+    Gap risk model with Intraday Chase Guard (v4 improvement).
+    Flags stocks opening >2.5% gap up as "Wait for Pullback".
     """
 
     @staticmethod
@@ -1013,18 +983,15 @@ class GapRiskModel:
             high = df['High'].squeeze()
             low = df['Low'].squeeze()
 
-            # Historical gap analysis (% of days with gap > 2%)
             gaps = ((open_price - close.shift(1)) / close.shift(1) * 100).dropna().abs()
             pct_large_gaps = (gaps > 2).sum() / len(gaps) * 100 if len(gaps) > 0 else 0
 
-            # Gap risk components
             gap_component = min(pct_large_gaps * 2, 40)
             earnings_component = max(0, 30 - days_to_earnings) if days_to_earnings < 30 else 0
             beta_component = max(0, (beta - 1.0) * 30)
 
             gap_risk_score = min(100, gap_component + earnings_component + beta_component)
 
-            # Position size reduction factor (1.0 = no reduction, 0.5 = halve)
             if gap_risk_score > 70:
                 size_factor = 0.50
             elif gap_risk_score > 50:
@@ -1034,16 +1001,20 @@ class GapRiskModel:
             else:
                 size_factor = 1.00
 
-            # ── STAGE-1 IMPROVEMENT: ATR-Based Gap Risk Multiplier ────────────
-            # If average overnight gap > 1.2× ATR → stock has liquidity vacuum risk
-            # This catches Indian midcap gaps that pure historical % misses
+            # ATR-Based Gap Risk Multiplier
             atr = ta.atr(high, low, close, 14)
             avg_atr_20 = atr.tail(20).mean()
-            avg_gap_abs = gaps.tail(20).mean() / 100 * close.tail(20).mean()  # in price terms
+            avg_gap_abs = gaps.tail(20).mean() / 100 * close.tail(20).mean()
             gap_to_atr_ratio = avg_gap_abs / avg_atr_20 if avg_atr_20 > 0 else 1.0
             atr_gap_penalty = gap_to_atr_ratio > 1.2
             if atr_gap_penalty:
-                size_factor = round(size_factor * 0.80, 2)  # Additional 20% reduction
+                size_factor = round(size_factor * 0.80, 2)
+
+            # ══ V4: INTRADAY CHASE GUARD ══
+            # If today's open > prev close + 2.5%, flag as "Wait for Pullback"
+            latest_gap_pct = ((open_price.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) * 100
+            intraday_chase_alert = latest_gap_pct > 2.5
+            entry_recommendation = "Wait for Pullback" if intraday_chase_alert else "Buy at Market"
 
             return {
                 'gap_risk_score': round(gap_risk_score, 2),
@@ -1052,25 +1023,130 @@ class GapRiskModel:
                 'beta': beta,
                 'position_size_factor': size_factor,
                 'risk_level': 'HIGH' if gap_risk_score > 60 else ('MEDIUM' if gap_risk_score > 30 else 'LOW'),
-                # Stage-1 additions
                 'gap_to_atr_ratio': round(gap_to_atr_ratio, 2),
                 'atr_gap_multiplier_triggered': atr_gap_penalty,
                 'liquidity_vacuum_risk': atr_gap_penalty,
+                # V4 additions
+                'latest_gap_pct': round(latest_gap_pct, 2),
+                'intraday_chase_alert': intraday_chase_alert,
+                'entry_recommendation': entry_recommendation,
             }
         except:
-            return {'gap_risk_score': 50, 'position_size_factor': 0.7, 'risk_level': 'MEDIUM'}
+            return {'gap_risk_score': 50, 'position_size_factor': 0.7, 'risk_level': 'MEDIUM',
+                    'intraday_chase_alert': False, 'entry_recommendation': 'Buy at Market'}
+
+
+class WickTrapFilter:
+    """
+    V4 IMPROVEMENT: Wick Rejection Filter.
+    If upper wick > 40% of total candle range on breakout day → Supply Injection trap.
+    """
+
+    WICK_THRESHOLD = 0.40  # 40%
+
+    @staticmethod
+    def check(df: pd.DataFrame) -> Dict:
+        try:
+            close = df['Close'].squeeze()
+            open_price = df['Open'].squeeze()
+            high = df['High'].squeeze()
+            low = df['Low'].squeeze()
+
+            # Calculate on the latest candle
+            candle_range = high.iloc[-1] - low.iloc[-1]
+            if candle_range <= 0:
+                return {'wick_ratio': 0, 'is_trap': False, 'status': 'OK'}
+
+            upper_wick = high.iloc[-1] - max(close.iloc[-1], open_price.iloc[-1])
+            upper_wick_ratio = upper_wick / candle_range
+
+            is_trap = upper_wick_ratio > WickTrapFilter.WICK_THRESHOLD
+
+            # Also check if price closed green but with huge upper wick (classic trap)
+            is_green_candle = close.iloc[-1] > open_price.iloc[-1]
+            supply_injection = is_trap and is_green_candle
+
+            return {
+                'upper_wick_ratio': round(upper_wick_ratio, 3),
+                'threshold': WickTrapFilter.WICK_THRESHOLD,
+                'is_trap': is_trap,
+                'supply_injection': supply_injection,
+                'status': '⚠️ Wick Trap — Supply Injection' if supply_injection else (
+                    '⚠️ High Upper Wick' if is_trap else '✅ OK'
+                ),
+            }
+        except:
+            return {'wick_ratio': 0, 'is_trap': False, 'status': 'Error'}
+
+
+class TrapDetector:
+    """
+    V4 IMPROVEMENT: Composite Trap Detector.
+    Combines: Wick Ratio, Volume Divergence, Extension from EMA.
+    """
+
+    @staticmethod
+    def analyze(df: pd.DataFrame) -> Dict:
+        try:
+            close = df['Close'].squeeze()
+            open_price = df['Open'].squeeze()
+            high = df['High'].squeeze()
+            low = df['Low'].squeeze()
+            volume = df['Volume'].squeeze()
+
+            trap_score = 0
+            trap_signals = []
+
+            # 1. Wick Ratio Check
+            wick_check = WickTrapFilter.check(df)
+            if wick_check['is_trap']:
+                trap_score += 35
+                trap_signals.append("High upper wick (supply injection)")
+
+            # 2. Volume Divergence: Price up but volume down
+            price_up = close.iloc[-1] > close.iloc[-2]
+            volume_down = volume.iloc[-1] < volume.tail(5).mean() * 0.8
+            if price_up and volume_down:
+                trap_score += 30
+                trap_signals.append("Price up on declining volume")
+
+            # 3. Extension from 20 EMA > 15% (rubber band effect)
+            ema20 = ta.ema(close, 20)
+            extension = ((close.iloc[-1] - ema20.iloc[-1]) / ema20.iloc[-1]) * 100
+            if extension > 15:
+                trap_score += 25
+                trap_signals.append(f"Extended {extension:.1f}% from 20 EMA")
+
+            # 4. Near resistance with weak close
+            recent_high = high.tail(20).max()
+            near_resistance = close.iloc[-1] >= recent_high * 0.98
+            weak_close = close.iloc[-1] < (high.iloc[-1] + low.iloc[-1]) / 2
+            if near_resistance and weak_close:
+                trap_score += 10
+                trap_signals.append("Near resistance with weak close")
+
+            trap_probability = min(100, trap_score)
+
+            return {
+                'trap_probability': trap_probability,
+                'trap_signals': trap_signals,
+                'wick_analysis': wick_check,
+                'extension_from_ema20': round(extension, 2),
+                'is_high_risk_trap': trap_probability >= 50,
+                'recommendation': (
+                    '⛔ AVOID — High trap probability' if trap_probability >= 70 else
+                    '⚠️ CAUTION — Moderate trap risk' if trap_probability >= 40 else
+                    '✅ OK — Low trap risk'
+                ),
+            }
+        except Exception as e:
+            return {'trap_probability': 0, 'trap_signals': [], 'is_high_risk_trap': False,
+                    'recommendation': 'Unable to analyze', 'error': str(e)}
 
 
 class BreakoutConfirmation:
     """
-    IMPROVEMENT #4: 2-day breakout confirmation to avoid NSE traps.
-    Day1: Close > resistance with 1.5x volume
-    Day2: Close still above resistance (not back inside range)
-
-    STAGE-1 ADDITIONS:
-    - Follow-Through Rule: Day+2 must not close below breakout midpoint
-    - Volume Z-Score: adaptive threshold instead of fixed 1.5x
-    - Bearish engulfing guard within 3 sessions
+    2-day breakout confirmation with v4 Wick Rejection integration.
     """
 
     @staticmethod
@@ -1082,44 +1158,32 @@ class BreakoutConfirmation:
             open_ = df['Open'].squeeze()
             volume = df['Volume'].squeeze()
 
-            # Resistance = 20-day high (excluding last 2 days)
             resistance = high.iloc[:-2].tail(20).max()
             avg_volume = volume.iloc[:-2].tail(20).mean()
             vol_std = volume.iloc[:-2].tail(20).std()
 
-            # ── STAGE-1: Volume Z-Score (adaptive vs fixed 1.5x) ──────────────
-            # More meaningful across midcap/largecap differences
             vol_zscore_d1 = ((volume.iloc[-2] - avg_volume) / vol_std) if vol_std > 0 else 0
             vol_zscore_d2 = ((volume.iloc[-1] - avg_volume) / vol_std) if vol_std > 0 else 0
-            # Breakout quality threshold: z-score > 1.0 ≈ top 16% of days (≈1.5x avg)
             vol_breakout_quality = (
                 'Strong' if vol_zscore_d1 > 2.0 else
                 'Good' if vol_zscore_d1 > 1.0 else
                 'Weak'
             )
 
-            # Original volume ratio (kept for backward compat)
             d1_volume_ratio = volume.iloc[-2] / avg_volume if avg_volume > 0 else 1
-
-            # Day 1 (second-to-last bar)
             d1_close = close.iloc[-2]
-            d1_broke = d1_close > resistance and vol_zscore_d1 > 0.5  # Z>0.5 ≈ above avg
+            d1_broke = d1_close > resistance and vol_zscore_d1 > 0.5
 
-            # Day 2 (latest bar)
             d2_close = close.iloc[-1]
             d2_held = d2_close > resistance
 
             confirmed = d1_broke and d2_held
 
-            # ── STAGE-1: Follow-Through Rule ─────────────────────────────────
-            # Day+2 must NOT close below the midpoint of the breakout candle
             breakout_midpoint = (high.iloc[-2] + low.iloc[-2]) / 2
             follow_through_ok = d2_close > breakout_midpoint
-
-            # Volume contraction on pullback (healthy sign)
             vol_contracting_d2 = vol_zscore_d2 < vol_zscore_d1
 
-            # ── STAGE-1: Bearish engulfing guard (3-session look-back) ────────
+            # Bearish engulfing guard
             bearish_engulf = False
             if len(df) >= 3:
                 for i in range(-3, 0):
@@ -1129,8 +1193,12 @@ class BreakoutConfirmation:
                         bearish_engulf = True
                         break
 
-            # Enhanced confirmation: original 2-day + follow-through + no engulf
-            confirmed_strict = confirmed and follow_through_ok and not bearish_engulf
+            # V4: Wick Rejection Check on breakout day
+            wick_check = WickTrapFilter.check(df)
+            wick_rejection_ok = not wick_check['is_trap']
+
+            # Enhanced confirmation with wick rejection
+            confirmed_strict = confirmed and follow_through_ok and not bearish_engulf and wick_rejection_ok
 
             return {
                 'resistance_level': round(resistance, 2),
@@ -1140,14 +1208,17 @@ class BreakoutConfirmation:
                 'day1_broke_out': d1_broke,
                 'day2_close': round(d2_close, 2),
                 'day2_held': d2_held,
-                'confirmed': confirmed,                          # Original 2-day check
-                'confirmed_strict': confirmed_strict,           # + follow-through + no engulf
+                'confirmed': confirmed,
+                'confirmed_strict': confirmed_strict,
                 'follow_through_ok': follow_through_ok,
                 'vol_contraction_pullback': vol_contracting_d2,
                 'volume_quality': vol_breakout_quality,
                 'bearish_engulf_detected': bearish_engulf,
+                'wick_rejection_ok': wick_rejection_ok,
+                'wick_analysis': wick_check,
                 'status': (
                     '✅ Strict Confirmed' if confirmed_strict else
+                    '⚠️ Confirmed (wick concern)' if confirmed and not wick_rejection_ok else
                     '⚠️ Confirmed (weak follow-through)' if confirmed else
                     ('⏳ Pending D2' if d1_broke else '❌ Not confirmed')
                 ),
@@ -1158,10 +1229,7 @@ class BreakoutConfirmation:
 
 
 class RSIClassifier:
-    """
-    IMPROVEMENT #3: Flexible RSI — no rigid 72 cap.
-    Graded classification including Power Play zone.
-    """
+    """Flexible RSI classification including Power Play zone."""
 
     @staticmethod
     def classify(rsi_value: float) -> Dict:
@@ -1190,11 +1258,10 @@ class RSIClassifier:
             strength = "Potential reversal"
             power_play = False
 
-        # Score: how favorable is this RSI for entry
         if 55 <= rsi_value <= 72:
             rsi_score = 100
         elif 72 < rsi_value <= 80:
-            rsi_score = 85   # Still good — Power Play
+            rsi_score = 85
         elif 45 <= rsi_value < 55:
             rsi_score = 70
         elif rsi_value > 80:
@@ -1215,10 +1282,8 @@ class RSIClassifier:
 
 class SetupClassifier:
     """
-    Enhanced classifier — IMPROVEMENT #12: Never return UNKNOWN.
-    Always return best setup. Just downgrade probability tier.
-
-    NOTE: Both classify() and classify_setup() are valid — kept for API compatibility.
+    Enhanced classifier with Trap Detection and Wick Rejection.
+    Never returns UNKNOWN — always returns best setup with tier adjustment.
     """
 
     @staticmethod
@@ -1255,26 +1320,16 @@ class SetupClassifier:
             atr_change_pct = ((curr_atr - atr_20_ago) / atr_20_ago) * 100 if atr_20_ago > 0 else 0
             is_contracting = atr_change_pct < -10
 
-            # RSI classification (flexible)
             rsi_info = RSIClassifier.classify(curr_rsi)
-
-            # Multi-TF RS
             rs_data = MultiTimeframeRS.calculate(close)
-
-            # Liquidity check
             liq_data = LiquidityFilter.check_liquidity(df, market_cap_cat)
-
-            # Gap risk
             gap_data = GapRiskModel.calculate(df, days_to_earnings, beta)
-
-            # Sector RS
             sector_rs = SectorLeadershipEngine.get_sector_rs_for_stock(sector, sector_data)
             sector_rs_positive = sector_rs.get('is_leading', False)
-
-            # 2-day breakout confirmation
             breakout_confirm = BreakoutConfirmation.check(df)
+            trap_analysis = TrapDetector.analyze(df)
 
-            # ═══ SCORING — 4 setups ═══
+            # SCORING
             breakout_score = 0
             pullback_score = 0
             momentum_score = 0
@@ -1287,9 +1342,9 @@ class SetupClassifier:
             if volume_ratio > 1.5: breakout_score += 15
             if range_pct < 8: breakout_score += 10
             if abs(dist_from_ema20) < 3: breakout_score += 5
-            if sector_rs_positive: breakout_score += 10       # NEW
-            if liq_data['is_liquid']: breakout_score += 5     # NEW
-            if breakout_confirm['confirmed']: breakout_score += 10  # NEW
+            if sector_rs_positive: breakout_score += 10
+            if liq_data['is_liquid']: breakout_score += 5
+            if breakout_confirm['confirmed_strict']: breakout_score += 10
 
             # PULLBACK signals
             is_pullback = -5 <= dist_from_ema20 <= -1.5
@@ -1299,22 +1354,22 @@ class SetupClassifier:
             if 35 <= curr_rsi <= 55: pullback_score += 15
             if volume_ratio < 1.0: pullback_score += 10
             if ema20.iloc[-1] > ema20.iloc[-5]: pullback_score += 5
-            if sector_rs_positive: pullback_score += 10       # NEW
-            if liq_data['is_liquid']: pullback_score += 5     # NEW
+            if sector_rs_positive: pullback_score += 10
+            if liq_data['is_liquid']: pullback_score += 5
 
             # MOMENTUM signals
             strong_uptrend = curr_price > ema20.iloc[-1] > ema50.iloc[-1]
             if strong_uptrend: momentum_score += 25
-            if 55 <= curr_rsi <= 80: momentum_score += 20     # WIDENED from 72
+            if 55 <= curr_rsi <= 80: momentum_score += 20
             if dist_from_ema20 > 3: momentum_score += 15
             if volume_ratio > 1.2: momentum_score += 10
             momentum_5d = ((curr_price - close.iloc[-5]) / close.iloc[-5]) * 100
             if momentum_5d > 3: momentum_score += 5
-            if rs_data['composite'] > 4: momentum_score += 10 # NEW: multi-TF RS
-            if sector_rs_positive: momentum_score += 10        # NEW
-            if liq_data['is_liquid']: momentum_score += 5      # NEW
+            if rs_data['composite'] > 4: momentum_score += 10
+            if sector_rs_positive: momentum_score += 10
+            if liq_data['is_liquid']: momentum_score += 5
 
-            # POWER PLAY signals (NEW)
+            # POWER PLAY signals
             if rsi_info['is_power_play']:
                 power_play_score += 30
             if strong_uptrend: power_play_score += 20
@@ -1324,7 +1379,7 @@ class SetupClassifier:
             if liq_data['is_liquid']: power_play_score += 5
             if momentum_5d > 5: power_play_score += 5
 
-            # ═══ DETERMINE SETUP — always return best, never UNKNOWN ═══
+            # DETERMINE SETUP
             scores = {
                 SetupType.BREAKOUT: breakout_score,
                 SetupType.PULLBACK: pullback_score,
@@ -1336,7 +1391,6 @@ class SetupClassifier:
             max_possible = 100
             confidence = scores[setup_type] / max_possible
 
-            # Probability tier (IMPROVEMENT #8 + #12)
             if confidence >= 0.75:
                 tier = ProbabilityTier.A_PLUS
             elif confidence >= 0.60:
@@ -1344,9 +1398,8 @@ class SetupClassifier:
             elif confidence >= 0.45:
                 tier = ProbabilityTier.B
             else:
-                tier = ProbabilityTier.C  # Still return setup, just size small
+                tier = ProbabilityTier.C
 
-            # Trade status
             if confidence >= 0.60 and liq_data['is_liquid']:
                 status = TradeStatus.READY
             elif confidence >= 0.40:
@@ -1354,15 +1407,28 @@ class SetupClassifier:
             else:
                 status = TradeStatus.AVOID
 
-            # If sector RS negative and it's breakout, downgrade
+            # Downgrade if sector RS negative for breakout
             if setup_type == SetupType.BREAKOUT and not sector_rs_positive:
                 if tier in (ProbabilityTier.A_PLUS, ProbabilityTier.A):
                     tier = ProbabilityTier.B
                     status = TradeStatus.WATCH
 
-            # ── STAGE-1 IMPROVEMENT: Hard Kill Conditions Layer ───────────────
-            # These are VETO conditions — override scoring regardless of grade.
-            # One critical flaw should invalidate even a B-grade setup.
+            # V4: Apply Trap Detector penalty
+            if trap_analysis['is_high_risk_trap']:
+                if tier == ProbabilityTier.A_PLUS:
+                    tier = ProbabilityTier.B
+                elif tier == ProbabilityTier.A:
+                    tier = ProbabilityTier.B
+                if status == TradeStatus.READY:
+                    status = TradeStatus.WATCH
+
+            # V4: Apply Wick Rejection penalty for breakouts
+            if setup_type == SetupType.BREAKOUT and not breakout_confirm.get('wick_rejection_ok', True):
+                if tier in (ProbabilityTier.A_PLUS, ProbabilityTier.A):
+                    tier = ProbabilityTier.B
+                status = TradeStatus.WATCH
+
+            # HARD KILL CONDITIONS
             hard_kills = []
             kill_triggered = False
 
@@ -1378,14 +1444,15 @@ class SetupClassifier:
             if gap_data.get('atr_gap_multiplier_triggered', False) and beta > 1.3:
                 hard_kills.append("⛔ Liquidity vacuum risk on high-beta stock")
                 kill_triggered = True
+            if trap_analysis['trap_probability'] >= 70:
+                hard_kills.append("⛔ High trap probability detected")
+                kill_triggered = True
 
             if kill_triggered:
                 tier = ProbabilityTier.C
                 status = TradeStatus.AVOID
 
-            # ── STAGE-1 IMPROVEMENT: Setup Context Tag ────────────────────────
-            # Late trend breakouts in Indian markets fail more frequently.
-            # Detect whether stock is in Early / Mid / Late trend phase.
+            # TREND CONTEXT TAG
             try:
                 ema200 = ta.ema(close, 200)
                 dist_from_ema200 = ((curr_price - ema200.iloc[-1]) / ema200.iloc[-1]) * 100
@@ -1396,7 +1463,6 @@ class SetupClassifier:
                     trend_context = "Mid_Trend"
                 else:
                     trend_context = "Late_Trend"
-                # Late trend breakouts get an extra caution flag
                 if trend_context == "Late_Trend" and setup_type == SetupType.BREAKOUT:
                     if status == TradeStatus.READY:
                         status = TradeStatus.WATCH
@@ -1418,11 +1484,11 @@ class SetupClassifier:
                 'sector_rs': sector_rs,
                 'sector_rs_positive': sector_rs_positive,
                 'breakout_confirmation': breakout_confirm,
+                'trap_analysis': trap_analysis,
                 'volume_ratio': round(volume_ratio, 2),
                 'dist_from_ema20': round(dist_from_ema20, 2),
                 'is_contracting': is_contracting,
                 'allocation_r': TIER_ALLOCATION[tier] * gap_data.get('position_size_factor', 1.0),
-                # Stage-1 additions
                 'trend_context': trend_context,
                 'hard_kill_conditions': hard_kills,
                 'kill_triggered': kill_triggered,
@@ -1439,14 +1505,11 @@ class SetupClassifier:
                 'error': str(e),
             }
 
-    # ── API compatibility alias ─────────────────────────────────────────
-    # api_server.py calls SetupClassifier.classify(...) — this alias makes
-    # both names valid so the server never throws AttributeError.
     classify = classify_setup
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  LAYER 3b: SETUP SCORER (Enhanced with new weights)
+#  LAYER 3b: SETUP SCORER
 # ═══════════════════════════════════════════════════════════════════════
 
 class SetupScorer:
@@ -1485,47 +1548,36 @@ class SetupScorer:
         scores = {}
         mandatory_passed = True
 
-        # Volatility contraction
         atr_20_ago = atr.iloc[-20] if len(atr) >= 20 else curr_atr
         atr_change = ((curr_atr - atr_20_ago) / atr_20_ago) * 100 if atr_20_ago > 0 else 0
         is_contracting = atr_change < -10
         scores['volatility_contraction'] = weights['volatility_contraction'] if is_contracting else 0
         if not is_contracting: mandatory_passed = False
 
-        # Volume expansion
         volume_ratio = curr_volume / avg_volume if avg_volume > 0 else 1
         scores['volume_expansion'] = min(weights['volume_expansion'], weights['volume_expansion'] * (volume_ratio / 1.5))
         if volume_ratio < 1.5: mandatory_passed = False
 
-        # Location quality
         recent_high = high.tail(20).max()
         res_dist = (recent_high - curr_price) / curr_atr if curr_atr > 0 else 0
         scores['location_quality'] = weights['location_quality'] if res_dist >= 1.5 else 0
 
-        # Regime
         regime_info = MarketRegimeEngine.detect_regime()
         regime_aligned = regime_info['type'] != RegimeType.RISK_OFF
         scores['regime_alignment'] = weights['regime_alignment'] if regime_aligned else 0
         if not regime_aligned: mandatory_passed = False
 
-        # Candle anatomy
         candle_body = abs(close.iloc[-1] - df['Open'].iloc[-1])
         candle_range = high.iloc[-1] - low.iloc[-1]
         body_ratio = candle_body / candle_range if candle_range > 0 else 0
         scores['candle_anatomy'] = weights['candle_anatomy'] * body_ratio
 
-        # RS (multi-TF)
         rs_data = MultiTimeframeRS.calculate(close, bench)
         scores['relative_strength'] = min(weights['relative_strength'],
                                           weights['relative_strength'] * max(0, rs_data['composite']) / 10)
 
-        # NEW: Sector RS
         scores['sector_rs'] = weights['sector_rs'] if sector_ok else 0
-
-        # NEW: Breadth confirmation
         scores['breadth_confirm'] = weights['breadth_confirm'] if breadth_ok else 0
-
-        # NEW: Liquidity
         scores['liquidity_score'] = weights['liquidity_score'] * (liq_score / 100)
 
         total = sum(scores.values())
@@ -1588,13 +1640,15 @@ class SetupScorer:
             'scores': {k: round(v, 2) for k, v in scores.items()},
             'passed_filters': mandatory_passed,
             'details': {
-                'ema_structure': ema_structure, 'distance_from_ema20': round(dist, 2),
-                'rsi': round(curr_rsi, 2), 'volume_ratio': round(vol_ratio, 2),
+                'ema_structure': ema_structure,
+                'ema50_rising': ema50_rising,
+                'pullback_distance': round(dist, 2),
+                'rsi': round(curr_rsi, 2),
             }
         }
 
     @staticmethod
-    def _score_momentum(df, bench, sector_ok, breadth_ok, liq_score, setup_type=SetupType.MOMENTUM) -> Dict:
+    def _score_momentum(df, bench, sector_ok, breadth_ok, liq_score, setup_type) -> Dict:
         config = SETUP_CONFIGS.get(setup_type, SETUP_CONFIGS[SetupType.MOMENTUM])
         weights = config.scoring_weights
         close = df['Close'].squeeze()
@@ -1612,7 +1666,7 @@ class SetupScorer:
 
         rs_data = MultiTimeframeRS.calculate(close, bench)
         scores['relative_strength'] = min(weights['relative_strength'],
-                                          weights['relative_strength'] * max(0, rs_data['composite']) / 10)
+                                          weights['relative_strength'] * rs_data['composite'] / 10)
         if rs_data['composite'] < 4: mandatory_passed = False
 
         avg_vol = volume.tail(20).mean()
@@ -1659,7 +1713,7 @@ class SetupScorer:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  LAYER 4: RISK LAYER — ATR + Beta + Gap + Event
+#  LAYER 4: RISK LAYER
 # ═══════════════════════════════════════════════════════════════════════
 
 class RiskCalculator:
@@ -1691,7 +1745,7 @@ class RiskCalculator:
             sl = max(ema10 - atr * 0.5, entry_price - (atr * sl_mult))
             t1 = entry_price + (atr * 2.0)
             t2 = entry_price + (atr * 3.5)
-        else:  # MOMENTUM
+        else:
             ema20 = ta.ema(close, 20).iloc[-1]
             sl_mult = np.mean(config.risk_profile['sl_atr_multiplier'])
             sl = max(ema20 - atr, entry_price - (atr * sl_mult))
@@ -1721,15 +1775,11 @@ class RiskCalculator:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  LAYER 5: CAPITAL LAYER — Probability Tiered Sizing
+#  LAYER 5: CAPITAL LAYER
 # ═══════════════════════════════════════════════════════════════════════
 
 class PositionSizingEngine:
-    """
-    IMPROVEMENT #8: Position size tied to probability tier.
-    A+ → 1.0R, A → 0.75R, B → 0.5R, C → 0.25R
-    Then further adjusted by gap risk.
-    """
+    """Position size tied to probability tier."""
 
     @staticmethod
     def calculate_position(total_capital: float, risk_per_trade_pct: float,
@@ -1740,13 +1790,9 @@ class PositionSizingEngine:
         if risk_per_share <= 0:
             return {'shares': 0, 'capital_required': 0, 'risk_amount': 0}
 
-        # Base R from tier
         r_multiplier = TIER_ALLOCATION[tier]
-
-        # Adjust for gap risk
         effective_r = r_multiplier * gap_risk_factor
 
-        # Max risk amount
         base_risk = total_capital * (risk_per_trade_pct / 100)
         adjusted_risk = base_risk * effective_r
 
@@ -1771,10 +1817,7 @@ class PositionSizingEngine:
 # ═══════════════════════════════════════════════════════════════════════
 
 class TradeExpectancyTracker:
-    """
-    IMPROVEMENT #11: Per-setup expectancy tracking.
-    Disables setups temporarily if expectancy goes negative.
-    """
+    """Per-setup expectancy tracking with edge stability."""
 
     def __init__(self, storage_path: str = "expectancy_data.json"):
         self._path = storage_path
@@ -1792,7 +1835,6 @@ class TradeExpectancyTracker:
             json.dump(self._data, f, indent=2)
 
     def record_trade(self, setup_type: str, r_result: float, won: bool):
-        """Record a completed trade result."""
         if setup_type not in self._data:
             self._data[setup_type] = {
                 'total': 0, 'wins': 0, 'losses': 0,
@@ -1829,20 +1871,16 @@ class TradeExpectancyTracker:
         avg_loss = d.get('total_r_lost', 0) / max(losses, 1)
         expectancy = (wr * avg_win) - (lr * avg_loss)
 
-        # Disable if negative expectancy over 10+ trades
         is_active = True
         if total >= 10 and expectancy < -0.1:
             is_active = False
 
-        # ── STAGE-1 IMPROVEMENT: Edge Stability Score ─────────────────────────
-        # Track rolling 20-trade expectancy to detect edge degradation early.
         history = d.get('history', [])
         rolling_exp = 0.0
         edge_stability = 'UNKNOWN'
-        confidence_meter = 'Gray'    # Gray=insufficient data, Green=good, Orange=flat, Red=degrading
+        confidence_meter = 'Gray'
 
         if len(history) >= 5:
-            # Rolling last 20 trades
             recent = history[-20:]
             r_wins = [h for h in recent if h.get('won')]
             r_losses = [h for h in recent if not h.get('won')]
@@ -1852,7 +1890,6 @@ class TradeExpectancyTracker:
             r_avg_loss = np.mean([abs(h['r']) for h in r_losses]) if r_losses else 0
             rolling_exp = (r_wr * r_avg_win) - (r_lr * r_avg_loss)
 
-            # Trend: is expectancy improving or degrading?
             if len(history) >= 10:
                 old_exp = self._calc_slice_expectancy(history[-10:-5])
                 new_exp = self._calc_slice_expectancy(history[-5:])
@@ -1866,17 +1903,12 @@ class TradeExpectancyTracker:
                 'DEGRADING' if rolling_exp > -0.2 else
                 'COLLAPSED'
             )
-            # Strategy Confidence Meter (displayed next to Freddy Gauge)
             confidence_meter = (
                 'Green' if rolling_exp > 0 and trend >= 0 else
                 'Orange' if rolling_exp >= -0.1 else
                 'Red'
             )
-            # Auto-reduce sizing if edge degrading
-            size_reduction = 0.0
-            if edge_stability in ('DEGRADING', 'COLLAPSED'):
-                size_reduction = 0.25  # Suggest 25% size reduction
-
+            size_reduction = 0.25 if edge_stability in ('DEGRADING', 'COLLAPSED') else 0.0
         else:
             rolling_exp = expectancy
             size_reduction = 0.0
@@ -1889,7 +1921,6 @@ class TradeExpectancyTracker:
             'trades': total,
             'is_active': is_active,
             'recommendation': 'ACTIVE' if is_active else '⚠️ DISABLED — negative expectancy',
-            # Stage-1 additions
             'rolling_expectancy_20': round(rolling_exp, 3),
             'edge_stability': edge_stability,
             'confidence_meter': confidence_meter,
@@ -1897,7 +1928,6 @@ class TradeExpectancyTracker:
         }
 
     def _calc_slice_expectancy(self, history_slice: list) -> float:
-        """Helper to compute expectancy for a slice of trade history."""
         if not history_slice:
             return 0.0
         wins = [h for h in history_slice if h.get('won')]
@@ -1914,7 +1944,7 @@ class TradeExpectancyTracker:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  PLAYBOOK GENERATOR (Enhanced)
+#  PLAYBOOK GENERATOR
 # ═══════════════════════════════════════════════════════════════════════
 
 class PlaybookGenerator:
@@ -1928,6 +1958,10 @@ class PlaybookGenerator:
         tier = classification.get('probability_tier', ProbabilityTier.B) if classification else ProbabilityTier.B
         status = classification.get('status', TradeStatus.WATCH) if classification else TradeStatus.WATCH
 
+        # V4: Add entry recommendation from gap risk
+        gap_risk = classification.get('gap_risk', {}) if classification else {}
+        entry_recommendation = gap_risk.get('entry_recommendation', 'Buy at Market')
+
         playbook = {
             'ticker': ticker,
             'setup_type': setup_type.value,
@@ -1936,19 +1970,19 @@ class PlaybookGenerator:
             'confidence': PlaybookGenerator._calc_confidence(score_data, regime_info),
             'allocation_r': TIER_ALLOCATION.get(tier, 0.5),
             'why_selected': PlaybookGenerator._explain(setup_type, score_data, regime_info),
-            'entry_plan': PlaybookGenerator._entry_plan(setup_type, risk_data),
+            'entry_plan': PlaybookGenerator._entry_plan(setup_type, risk_data, entry_recommendation),
             'what_to_watch': PlaybookGenerator._watch_items(setup_type),
             'invalidation_rules': PlaybookGenerator._invalidation(setup_type, risk_data),
             'risk_comment': PlaybookGenerator._risk_comment(setup_type, risk_data),
             'time_decay': config.time_decay_days,
             'risk_data': risk_data,
-            # NEW fields
             'regime_aligned': regime_info['type'] != RegimeType.RISK_OFF,
             'rr_ratio': risk_data.get('rr1', 0),
             'event_risk': classification.get('gap_risk', {}).get('risk_level', 'LOW') if classification else 'LOW',
             'sector_rs_aligned': classification.get('sector_rs_positive', False) if classification else False,
             'liquidity_ok': classification.get('liquidity', {}).get('is_liquid', True) if classification else True,
             'breakout_confirmed': classification.get('breakout_confirmation', {}).get('confirmed', True) if classification else True,
+            'trap_probability': classification.get('trap_analysis', {}).get('trap_probability', 0) if classification else 0,
         }
         return playbook
 
@@ -1971,45 +2005,53 @@ class PlaybookGenerator:
         return base.get(setup_type, "Setup identified") + f"\n{regime_info.get('message', '')}"
 
     @staticmethod
-    def _entry_plan(setup_type, risk_data):
+    def _entry_plan(setup_type, risk_data, entry_recommendation):
         plans = {
             SetupType.BREAKOUT: {
                 'primary': f"Buy above ₹{risk_data['entry']} with vol > 1.5x AFTER 2-day confirmation",
                 'alternate': "If intraday pullback to breakout level with volume support",
-                'avoid': "Gap up > 2%, late-day breakout, no 2-day confirmation",
+                'avoid': "Gap up > 2.5%, late-day breakout, wick rejection, no 2-day confirmation",
+                'entry_mode': entry_recommendation,
             },
             SetupType.PULLBACK: {
                 'primary': f"Buy on bounce above ₹{risk_data['entry']} with volume expansion",
                 'alternate': "Enter on reversal candle at EMA20 support",
                 'avoid': "Continued breakdown below EMA20, volume spike on decline",
+                'entry_mode': entry_recommendation,
             },
             SetupType.MOMENTUM: {
                 'primary': f"Buy on continuation above ₹{risk_data['entry']} with strong candle",
                 'alternate': "Scale in on shallow pullback to EMA10/20",
-                'avoid': "Parabolic move > 3 ATR in 2 days, bearish reversal candle",
+                'avoid': "Exhaustion gap, distribution candle",
+                'entry_mode': entry_recommendation,
             },
             SetupType.POWER_PLAY: {
-                'primary': f"Buy on momentum continuation above ₹{risk_data['entry']}. Tight trail.",
-                'alternate': "Scale in on any dip to EMA10 — these don't wait",
-                'avoid': "Exhaustion gap > 3%, RSI > 85, parabolic blow-off",
+                'primary': f"Buy on strength above ₹{risk_data['entry']} if RSI stays 72+",
+                'alternate': "Enter on minor dip if RSI holds 68+",
+                'avoid': "RSI divergence, distribution day",
+                'entry_mode': entry_recommendation,
             },
         }
-        return plans.get(setup_type, {'primary': f"Buy at ₹{risk_data['entry']}"})
+        return plans.get(setup_type, {
+            'primary': f"Buy near ₹{risk_data['entry']}",
+            'alternate': "Monitor",
+            'avoid': "Adverse conditions",
+            'entry_mode': entry_recommendation,
+        })
 
     @staticmethod
     def _watch_items(setup_type):
         items = {
             SetupType.BREAKOUT: [
-                "2-day close above resistance (CONFIRMED?)",
-                "Volume expansion continuation",
-                "Sector RS still positive",
-                "Breadth supporting move",
-                "No gap-down reversal",
+                "Volume sustained above average",
+                "Day 2 holds above resistance",
+                "No wick rejection (< 40% upper wick)",
+                "Sector continues to lead",
+                "Market breadth intact",
             ],
             SetupType.PULLBACK: [
-                "Bounce candle with volume",
-                "Holding above EMA20",
-                "RSI turning up from 35-50 zone",
+                "Bounce from EMA20/50 with volume",
+                "RSI turning up from 35-45 zone",
                 "Weekly trend intact",
                 "Sector still leading",
             ],
@@ -2035,6 +2077,7 @@ class PlaybookGenerator:
         rules = {
             SetupType.BREAKOUT: [
                 f"Day 2 close back inside range (below ₹{risk_data.get('entry', 0)})",
+                "Wick rejection > 40% of candle range",
                 "Volume dries up on breakout attempt",
                 "Market regime flips to Risk-Off",
                 f"Stop loss at ₹{risk_data['stop_loss']}",
@@ -2070,7 +2113,7 @@ class PlaybookGenerator:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  ACTIVE TRADE EVALUATOR (Enhanced)
+#  ACTIVE TRADE EVALUATOR
 # ═══════════════════════════════════════════════════════════════════════
 
 class ActiveTradeEvaluator:
@@ -2102,11 +2145,11 @@ class ActiveTradeEvaluator:
             health_score = sum(v for v in health_factors.values()) / len(health_factors)
 
             if health_score >= 70:
-                status, color = "Strong", "green"
+                status, color = "Strong", "#00FF9D"
             elif health_score >= 50:
-                status, color = "Warning", "orange"
+                status, color = "Warning", "#FFBF00"
             else:
-                status, color = "Weak", "red"
+                status, color = "Weak", "#FF0055"
 
             atr = ta.atr(high, low, close, 14).iloc[-1]
             new_sl = ActiveTradeEvaluator._calc_trailing_sl(
@@ -2213,28 +2256,20 @@ class ActiveTradeEvaluator:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  PORTFOLIO-LEVEL RISK ENGINE — Critical Missing Component (Stage-1)
+#  PORTFOLIO-LEVEL RISK ENGINE — V4 HARD BLOCKS
 # ═══════════════════════════════════════════════════════════════════════
 
 class PortfolioRiskEngine:
     """
-    STAGE-1 CRITICAL ADDITION: Portfolio-level risk controls.
-
-    Indian markets correct sector-wide and gap on global cues.
-    Trade-by-trade sizing is insufficient — portfolio exposure must be capped.
-
-    Rules:
-      • Max 6 open positions
-      • Max 2 positions per sector
-      • Max 40% capital in high-beta (β > 1.3) stocks
-      • Portfolio max drawdown trigger → reduce all by 25%
+    Portfolio-level risk controls with HARD BLOCKS (v4 improvement).
+    Returns "BLOCKED (Sector Cap)" status instead of allowing trade.
     """
 
     MAX_POSITIONS = 6
     MAX_PER_SECTOR = 2
-    MAX_HIGH_BETA_PCT = 40.0    # % of total capital
-    DRAWDOWN_TRIGGER_PCT = 8.0  # Portfolio drawdown % that triggers size reduction
-    DRAWDOWN_REDUCTION = 0.75   # Reduce all sizing to 75% on trigger
+    MAX_HIGH_BETA_PCT = 40.0
+    DRAWDOWN_TRIGGER_PCT = 8.0
+    DRAWDOWN_REDUCTION = 0.75
 
     @staticmethod
     def validate_new_trade(
@@ -2242,22 +2277,24 @@ class PortfolioRiskEngine:
         proposed_sector: str,
         proposed_beta: float,
         proposed_capital_pct: float,
-        active_positions: List[Dict],  # [{ticker, sector, beta, capital_pct}]
+        active_positions: List[Dict],
         portfolio_current_drawdown_pct: float = 0.0
     ) -> Dict:
         """
         Check whether a new trade violates portfolio-level rules.
-        Returns {allowed: bool, reasons: list, adjusted_size_pct: float}
+        Returns {allowed: bool, block_reason: str, ...}
         """
         violations = []
         warnings = []
         allowed = True
         size_multiplier = 1.0
+        block_reason = None
 
         # Rule 1: Max position count
         if len(active_positions) >= PortfolioRiskEngine.MAX_POSITIONS:
             violations.append(f"⛔ Max {PortfolioRiskEngine.MAX_POSITIONS} positions reached ({len(active_positions)} open)")
             allowed = False
+            block_reason = "BLOCKED (Max Positions)"
 
         # Rule 2: Max per sector
         sector_count = sum(1 for p in active_positions
@@ -2265,6 +2302,7 @@ class PortfolioRiskEngine:
         if sector_count >= PortfolioRiskEngine.MAX_PER_SECTOR:
             violations.append(f"⛔ Sector '{proposed_sector}' already has {sector_count} positions (max {PortfolioRiskEngine.MAX_PER_SECTOR})")
             allowed = False
+            block_reason = f"BLOCKED (Sector Cap: {proposed_sector})"
 
         # Rule 3: High-beta exposure cap
         if proposed_beta > 1.3:
@@ -2277,6 +2315,7 @@ class PortfolioRiskEngine:
                     f"(max {PortfolioRiskEngine.MAX_HIGH_BETA_PCT}%)"
                 )
                 allowed = False
+                block_reason = "BLOCKED (High-Beta Cap)"
 
         # Rule 4: Portfolio drawdown trigger
         if portfolio_current_drawdown_pct >= PortfolioRiskEngine.DRAWDOWN_TRIGGER_PCT:
@@ -2286,7 +2325,6 @@ class PortfolioRiskEngine:
                 f"{PortfolioRiskEngine.DRAWDOWN_REDUCTION * 100:.0f}%"
             )
 
-        # Portfolio stats summary
         total_deployed_pct = sum(p.get('capital_pct', 0) for p in active_positions)
         high_beta_deployed = sum(p.get('capital_pct', 0) for p in active_positions if p.get('beta', 1.0) > 1.3)
         sectors_used = {}
@@ -2296,6 +2334,7 @@ class PortfolioRiskEngine:
 
         return {
             'allowed': allowed,
+            'block_reason': block_reason,
             'violations': violations,
             'warnings': warnings,
             'size_multiplier': size_multiplier,
@@ -2311,16 +2350,44 @@ class PortfolioRiskEngine:
         }
 
     @staticmethod
+    def check_portfolio_constraint(
+        proposed_sector: str,
+        active_positions: List[Dict]
+    ) -> Dict:
+        """
+        V4 IMPROVEMENT: Quick check for portfolio constraints.
+        Returns constraint status to embed in TradeStatus.
+        """
+        sector_count = sum(1 for p in active_positions
+                           if p.get('sector', '').lower() == proposed_sector.lower())
+
+        if len(active_positions) >= PortfolioRiskEngine.MAX_POSITIONS:
+            return {
+                'is_blocked': True,
+                'status': TradeStatus.BLOCKED,
+                'reason': "Max Positions",
+                'message': f"⛔ BLOCKED — Max {PortfolioRiskEngine.MAX_POSITIONS} positions reached"
+            }
+
+        if sector_count >= PortfolioRiskEngine.MAX_PER_SECTOR:
+            return {
+                'is_blocked': True,
+                'status': TradeStatus.BLOCKED,
+                'reason': f"Sector Cap ({proposed_sector})",
+                'message': f"⛔ BLOCKED — {proposed_sector} sector already has {sector_count} positions"
+            }
+
+        return {
+            'is_blocked': False,
+            'status': None,
+            'reason': None,
+            'message': None
+        }
+
+    @staticmethod
     def get_operating_mode(regime_type: RegimeType, breadth_slope: float,
                            vol_regime: str) -> Dict:
-        """
-        STAGE-1 ADVANCED: 3-Mode Adaptive Operating System.
-        Switches mode automatically based on Regime + Breadth + Volatility.
-
-        Conservative Mode (Late Cycle): smaller sizes, fewer positions
-        Balanced Mode: standard operation
-        Aggressive Mode (Early Bull): larger sizes, full position count
-        """
+        """3-Mode Adaptive Operating System."""
         if (regime_type == RegimeType.RISK_ON and
                 breadth_slope > 0 and
                 vol_regime in ('Low_Vol_Expansion', 'High_Vol_Compression')):
@@ -2350,13 +2417,13 @@ class PortfolioRiskEngine:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  MASTER ORCHESTRATOR — Ties all layers together
+#  MASTER ORCHESTRATOR — Swing Bull Trader Engine
 # ═══════════════════════════════════════════════════════════════════════
 
-class FreddyEngine:
+class SwingBullEngine:
     """
-    Master orchestrator. Runs all 6 layers for full analysis.
-    Protected by authentication for personal use only.
+    Master orchestrator (renamed from FreddyEngine).
+    Runs all 7 layers for full analysis with portfolio hard blocks.
     """
 
     def __init__(self, total_capital: float = 1000000.0, risk_per_trade: float = 2.0):
@@ -2366,6 +2433,7 @@ class FreddyEngine:
         self.risk_per_trade = risk_per_trade
         self._sector_cache = {}
         self._sector_cache_time = 0
+        self._active_positions: List[Dict] = []
 
     def login(self, username: str, password: str, ip: str = "127.0.0.1") -> Optional[str]:
         return self._auth.login(username, password, ip)
@@ -2373,10 +2441,9 @@ class FreddyEngine:
     def logout(self, token: str):
         self._auth.logout(token)
 
-    # ── Public (no-auth) helpers for api_server.py endpoints ───────────
-    # The market-regime endpoint was returning 500 because @require_auth
-    # was rejecting unauthenticated calls before any session was established.
-    # These public wrappers bypass auth for read-only market data.
+    def set_active_positions(self, positions: List[Dict]):
+        """Update active positions for portfolio constraint checks."""
+        self._active_positions = positions
 
     def get_market_regime_public(self) -> Dict:
         """Public market regime — no auth required. Safe: read-only data."""
@@ -2385,33 +2452,35 @@ class FreddyEngine:
             volatility = VolatilityRegimeEngine.detect_state()
             regime = MarketRegimeEngine.detect_regime(breadth_data=breadth, volatility_data=volatility)
             sectors = self._get_sector_data()
+
             return {
-                'freddy_gauge': {
+                'market_pulse': {  # Renamed from freddy_gauge
                     'mpi': regime['mpi'],
                     'degrees': regime['gauge_degrees'],
                     'regime': regime['type'].value,
+                    'zone': regime['gauge_zone'],
+                    'zone_label': regime['gauge_zone_label'],
                     'label': 'Risk-Off' if regime['mpi'] < 35 else ('Risk-On' if regime['mpi'] > 65 else 'Neutral'),
                 },
                 'breadth': breadth,
                 'volatility': {
                     'state': volatility['state'].value,
+                    'vol_regime': volatility.get('vol_regime', 'Unknown'),
                     'favored': volatility.get('favored_strategies', []),
                 },
                 'sectors': sectors,
                 'regime_details': regime['details'],
                 'timestamp': datetime.now(IST_TZ).strftime('%Y-%m-%d %H:%M IST'),
+                'dashboard_meta': DASHBOARD_META,
             }
         except Exception as e:
             logger.error(f"Market regime public error: {e}")
-            return {'error': str(e), 'regime': 'Neutral', 'mpi': 50}
+            return {'error': str(e), 'regime': 'Neutral', 'mpi': 50, 'dashboard_meta': DASHBOARD_META}
 
     def scan_stocks_public(self, tickers: List[str],
                            sector_map: Dict[str, str] = None,
                            market_cap_map: Dict[str, str] = None) -> List[Dict]:
-        """
-        Public scanner — no auth required.
-        Replaces the auth-gated scan that was causing 500s.
-        """
+        """Public scanner — no auth required."""
         sector_data = self._get_sector_data()
         results = []
         for ticker in tickers:
@@ -2424,16 +2493,28 @@ class FreddyEngine:
                 classification = SetupClassifier.classify_setup(
                     df, ticker, sector, cap_cat, 999, 1.0, sector_data
                 )
+
+                # V4: Check portfolio constraints
+                portfolio_check = PortfolioRiskEngine.check_portfolio_constraint(
+                    sector, self._active_positions
+                )
+
                 entry_price = float(df['Close'].squeeze().iloc[-1])
                 risk_data = RiskCalculator.calculate_risk_params(
                     df, classification['setup_type'], entry_price,
                     classification.get('gap_risk')
                 )
+
+                # Override status if blocked
+                final_status = classification['status']
+                if portfolio_check['is_blocked']:
+                    final_status = TradeStatus.BLOCKED
+
                 results.append({
                     'ticker': ticker,
                     'setup_type': classification['setup_type'].value,
                     'tier': classification['probability_tier'].value,
-                    'status': classification['status'].value,
+                    'status': final_status.value,
                     'confidence': classification['confidence'],
                     'entry': risk_data['entry'],
                     'stop_loss': risk_data['stop_loss'],
@@ -2442,13 +2523,19 @@ class FreddyEngine:
                     'sector_rs': classification.get('sector_rs_positive', False),
                     'liquidity_ok': classification.get('liquidity', {}).get('is_liquid', False),
                     'volume_ratio': classification.get('volume_ratio', 1.0),
+                    'trap_probability': classification.get('trap_analysis', {}).get('trap_probability', 0),
+                    'intraday_chase_alert': classification.get('gap_risk', {}).get('intraday_chase_alert', False),
+                    'portfolio_blocked': portfolio_check['is_blocked'],
+                    'block_reason': portfolio_check.get('reason'),
+                    'ui_hints': {
+                        'status_color': DASHBOARD_META['status_colors'].get(final_status.value, '#64748B'),
+                    },
                 })
             except Exception as e:
                 logger.error(f"Error processing {ticker}: {e}")
         return sorted(results, key=lambda x: x['confidence'], reverse=True)
 
     def _get_sector_data(self) -> Dict:
-        """Cache sector data for 15 minutes."""
         if time.time() - self._sector_cache_time > 900:
             self._sector_cache = SectorLeadershipEngine.analyze_sectors()
             self._sector_cache_time = time.time()
@@ -2460,10 +2547,7 @@ class FreddyEngine:
                       days_to_earnings: int = 999,
                       beta: float = 1.0,
                       auth_token: str = "") -> Dict:
-        """
-        Complete 6-layer analysis for a single stock.
-        Returns everything needed for a trade card.
-        """
+        """Complete 7-layer analysis with portfolio constraints."""
         # Layer 1: Market
         breadth = MarketBreadthEngine.calculate_breadth()
         volatility = VolatilityRegimeEngine.detect_state()
@@ -2485,7 +2569,7 @@ class FreddyEngine:
 
         setup_type = classification['setup_type']
         if setup_type == SetupType.UNKNOWN:
-            setup_type = SetupType.PULLBACK  # Fallback
+            setup_type = SetupType.PULLBACK
 
         # Score
         score_data = SetupScorer.score_setup(
@@ -2514,9 +2598,16 @@ class FreddyEngine:
         # Layer 6: Expectancy check
         expectancy = self._expectancy.get_expectancy(setup_type.value)
 
-        # Override status if setup has negative expectancy
         if not expectancy['is_active']:
             classification['status'] = TradeStatus.AVOID
+            classification['probability_tier'] = ProbabilityTier.C
+
+        # Layer 7: Portfolio constraints (V4)
+        portfolio_check = PortfolioRiskEngine.check_portfolio_constraint(
+            sector, self._active_positions
+        )
+        if portfolio_check['is_blocked']:
+            classification['status'] = TradeStatus.BLOCKED
             classification['probability_tier'] = ProbabilityTier.C
 
         # Playbook
@@ -2533,9 +2624,11 @@ class FreddyEngine:
                     'score': regime['score'],
                     'mpi': regime['mpi'],
                     'gauge_degrees': regime['gauge_degrees'],
+                    'gauge_zone': regime['gauge_zone'],
                     'breadth': regime['breadth'],
                     'volatility': {
                         'state': volatility['state'].value,
+                        'vol_regime': volatility.get('vol_regime', 'Unknown'),
                         'atr_ratio': volatility.get('atr_ratio', 1.0),
                     },
                     'favored_strategies': regime.get('favored_strategies', []),
@@ -2555,7 +2648,7 @@ class FreddyEngine:
                     'rsi': classification.get('rsi', {}),
                     'rs': classification.get('rs', {}),
                     'breakout_confirmation': classification.get('breakout_confirmation', {}),
-                    # Stage-1 additions
+                    'trap_analysis': classification.get('trap_analysis', {}),
                     'trend_context': classification.get('trend_context', 'Mid_Trend'),
                     'hard_kill_conditions': classification.get('hard_kill_conditions', []),
                     'kill_triggered': classification.get('kill_triggered', False),
@@ -2567,6 +2660,7 @@ class FreddyEngine:
                 },
                 'capital': position,
                 'evolution': expectancy,
+                'portfolio': portfolio_check,
             },
             'playbook': playbook,
             'trade_card': {
@@ -2577,50 +2671,52 @@ class FreddyEngine:
                 'time_decay_days': SETUP_CONFIGS.get(setup_type, SETUP_CONFIGS[SetupType.MOMENTUM]).time_decay_days,
                 'event_risk': classification.get('gap_risk', {}).get('risk_level', 'LOW'),
                 'status': classification['status'].value,
-                'color': {
-                    TradeStatus.READY: '#00e676',
-                    TradeStatus.WATCH: '#ff9100',
-                    TradeStatus.AVOID: '#ff1744',
-                    TradeStatus.EXPIRED: '#9e9e9e',
-                }.get(classification['status'], '#9e9e9e'),
+                'color': DASHBOARD_META['status_colors'].get(classification['status'].value, '#64748B'),
             },
+            'dashboard_meta': DASHBOARD_META,
         }
 
     @require_auth
     def market_overview(self, auth_token: str = "") -> Dict:
-        """Dashboard market overview — Freddy Gauge + sector gauges."""
+        """Dashboard market overview — Market Pulse + sector gauges."""
         breadth = MarketBreadthEngine.calculate_breadth()
         volatility = VolatilityRegimeEngine.detect_state()
         regime = MarketRegimeEngine.detect_regime(breadth_data=breadth, volatility_data=volatility)
         sectors = self._get_sector_data()
 
         return {
-            'freddy_gauge': {
+            'market_pulse': {  # Renamed from freddy_gauge
                 'mpi': regime['mpi'],
                 'degrees': regime['gauge_degrees'],
+                'zone': regime['gauge_zone'],
+                'zone_label': regime['gauge_zone_label'],
                 'regime': regime['type'].value,
                 'label': 'Risk-Off' if regime['mpi'] < 35 else ('Risk-On' if regime['mpi'] > 65 else 'Neutral'),
             },
             'breadth': breadth,
             'volatility': {
                 'state': volatility['state'].value,
+                'vol_regime': volatility.get('vol_regime', 'Unknown'),
                 'favored': volatility.get('favored_strategies', []),
             },
             'sectors': sectors,
             'regime_details': regime['details'],
             'timestamp': datetime.now(IST_TZ).strftime('%Y-%m-%d %H:%M IST'),
+            'dashboard_meta': DASHBOARD_META,
         }
 
     @require_auth
     def record_trade_result(self, setup_type: str, r_result: float,
                             won: bool, auth_token: str = ""):
-        """Record completed trade for expectancy tracking."""
         self._expectancy.record_trade(setup_type, r_result, won)
 
     @require_auth
     def get_performance_stats(self, auth_token: str = "") -> Dict:
-        """Performance evolution panel data."""
         return self._expectancy.get_all_stats()
+
+
+# Backward compatibility alias
+FreddyEngine = SwingBullEngine
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2628,15 +2724,16 @@ class FreddyEngine:
 # ═══════════════════════════════════════════════════════════════════════
 
 __all__ = [
-    'FreddyEngine', 'AuthManager', 'SecurityConfig',
+    'SwingBullEngine', 'FreddyEngine', 'AuthManager', 'SecurityConfig',
     'SetupType', 'RegimeType', 'VolatilityState', 'ProbabilityTier', 'TradeStatus',
     'MarketRegimeEngine', 'MarketBreadthEngine', 'VolatilityRegimeEngine',
     'SectorLeadershipEngine', 'MultiTimeframeRS',
     'SetupClassifier', 'SetupScorer', 'RSIClassifier',
     'LiquidityFilter', 'GapRiskModel', 'BreakoutConfirmation',
+    'WickTrapFilter', 'TrapDetector',
     'RiskCalculator', 'PositionSizingEngine',
     'PlaybookGenerator', 'ActiveTradeEvaluator',
     'TradeExpectancyTracker',
-    # v3 additions
     'PortfolioRiskEngine',
+    'DASHBOARD_META',
 ]
