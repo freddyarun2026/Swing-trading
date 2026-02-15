@@ -1,5 +1,8 @@
 # ─────────────────────────────────────────────────────────
-#  FREDDY EVOLUTION ENGINE v3 — Render Backend Requirements
+#  FREDDY EVOLUTION ENGINE v4 — Render Backend Requirements
+#  FIX: pandas-ta is incompatible with pandas 2.x.
+#       Pinned pandas to 1.5.3 and numpy to 1.24.4.
+#       Your code uses no pandas 2.x-specific features.
 # ─────────────────────────────────────────────────────────
 
 # Web server
@@ -9,10 +12,9 @@ gunicorn==21.2.0
 
 # Data & finance
 yfinance==0.2.37
-pandas>=2.3.2
-numpy>=2.2.6
-# pandas-ta: do NOT pin to beta version string — install latest stable
-pandas-ta
+pandas==1.5.3
+numpy==1.24.4
+pandas-ta==0.3.14b0
 
 # Timezone
 pytz==2024.1
