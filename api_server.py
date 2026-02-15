@@ -36,29 +36,40 @@ import numpy as np
 from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask.json.provider import DefaultJSONProvider
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  NUMPY-SAFE JSON ENCODER
-#  Fixes: "Object of type bool/int64/float64 is not JSON serializable"
-#  numpy returns its own bool/int/float types — this converts them to plain
-#  Python types so Flask's jsonify() can handle them without crashing.
+#  NUMPY-SAFE JSON PROVIDER  (Flask 3.x compatible)
+#  Flask 3.0 removed app.json_encoder — must use app.json_provider_class
+#  Fixes: "Object of type numpy.bool_ / int64 / float64 not JSON serializable"
 # ═══════════════════════════════════════════════════════════════════════════
 
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
+class NumpyJSONProvider(DefaultJSONProvider):
+    @staticmethod
+    def _convert(obj):
+        """Recursively convert numpy types to plain Python types."""
         if isinstance(obj, np.bool_):
             return bool(obj)
-        if isinstance(obj, (np.int8, np.int16, np.int32, np.int64,
-                            np.uint8, np.uint16, np.uint32, np.uint64)):
+        if isinstance(obj, (np.integer,)):
             return int(obj)
-        if isinstance(obj, (np.float16, np.float32, np.float64)):
+        if isinstance(obj, (np.floating,)):
             if np.isnan(obj) or np.isinf(obj):
-                return None          # JSON has no NaN/Inf — return null
+                return None      # JSON has no NaN / Inf
             return float(obj)
         if isinstance(obj, np.ndarray):
             return obj.tolist()
-        return super().default(obj)
+        if isinstance(obj, dict):
+            return {k: NumpyJSONProvider._convert(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [NumpyJSONProvider._convert(i) for i in obj]
+        return obj
+
+    def dumps(self, obj, **kwargs):
+        return super().dumps(self._convert(obj), **kwargs)
+
+    def dump(self, obj, fp, **kwargs):
+        return super().dump(self._convert(obj), fp, **kwargs)
 
 # ── Import the trading engine ──────────────────────────────────────────────
 from trading_engine_v4 import (
@@ -87,7 +98,8 @@ logging.basicConfig(
 logger = logging.getLogger("swingbull.api")
 
 app = Flask(__name__)
-app.json_encoder = NumpyEncoder          # ← use numpy-safe encoder globally
+app.json_provider_class = NumpyJSONProvider   # Flask 3.x numpy-safe JSON
+app.json = NumpyJSONProvider(app)              # activate it immediately
 
 # ── CORS: allow your frontend origins ─────────────────────────────────────
 ALLOWED_ORIGINS = [
