@@ -8,8 +8,10 @@ yfinance>=0.2.37
 pandas>=2.0.0
 numpy>=1.24.0
 
-# Correct ZIP link for pandas-ta (Main branch)
-https://github.com/twopirllc/pandas-ta/archive/refs/heads/main.zip
+# pandas-ta: pinned to last release supporting Python 3.11
+# (The original twopirllc/pandas-ta GitHub repo has been removed.
+#  The new PyPI pandas-ta v0.4+ requires Python >=3.12.)
+pandas-ta==0.3.14b0
 
 # Timezone & Utilities
 pytz>=2024.1
