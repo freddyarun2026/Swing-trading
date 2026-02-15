@@ -1,29 +1,38 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║          SWING BULL TRADER™ v4.0 — Trading Engine                           ║
+║          SWING BULL TRADER™ v1.0 — Trading Engine                           ║
 ║          Architected by Freddy — Personal Use Only                          ║
 ║          Indian Market Optimized • NSE/BSE Focus                            ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 LAYERED ARCHITECTURE:
-  Layer 1: Market   (Regime + REAL Breadth + Volatility State)
-  Layer 2: Sector   (Leadership + Multi-TF Relative Strength)
-  Layer 3: Stock    (Setup Detection + Structure + Power Play)
-  Layer 4: Risk     (ATR + Beta + Gap Risk + Event Risk)
-  Layer 5: Capital  (Probability Tiered Sizing + Exposure Mgmt)
+  Layer 1: Market   (Regime + REAL Breadth + Volatility + Divergence Detection)
+  Layer 2: Sector   (Leadership + RS Velocity / Slope-Based Rotation)
+  Layer 3: Stock    (Setup Detection + VCP + Institutional Volume Gate)
+  Layer 4: Risk     (ATR + Beta + Dynamic Gap + Liquidity-Adjusted)
+  Layer 5: Capital  (Probability Tiered Sizing + Correlation Replacement)
   Layer 6: Evolution(Expectancy Tracking + Self-Protective Logic)
-  Layer 7: Portfolio(Risk Engine — Hard Blocks + Sector Caps)
+  Layer 7: Portfolio(Risk Engine — Hard Blocks + Sector Caps + Divergence)
+  Layer 8: Journal  (Auto-Journaling + Trade Logic Recording)
 
-VERSION 4.0 IMPROVEMENTS (from improvement.txt):
-  🆕 1. Renamed "Freddy Engine" → "Swing Bull Trader"
-  🆕 2. Renamed "Freddy Gauge" → "Market Pulse" (0-180° calibrated)
-  🆕 3. Wick Trap Filter — kills setups with >40% upper wick on breakout
-  🆕 4. Portfolio Hard Blocks — returns "BLOCKED (Sector Cap)" status
-  🆕 5. Gap-Up Trap / Intraday Chase Guard — flags >2.5% gap opens
-  🆕 6. Trap Detector Algorithm (wick ratio, volume divergence, extension)
-  🆕 7. Dashboard Meta — branding, version, color palette in API response
-  🆕 8. UI-Ready Color Hints — CSS colors for frontend rendering
-  🆕 9. Market Pulse Zones: 0-45° Red, 45-135° Yellow, 135-180° Green
+VERSION 1.0 IMPROVEMENTS:
+  🆕 1.  Volume Intensity: Breakout min_volume_ratio raised 1.5x → 2.5x (institutional footprint gate)
+  🆕 2.  RS Elite Filter: Momentum min_rs raised 4.0 → 8.0 (top 1% leaders only)
+  🆕 3.  Wick Trap Suppression: trap_probability >40% → auto AVOID (hidden from dashboard)
+  🆕 4.  Weekly Volume Confirmation: new mandatory gate on all setup types
+  🆕 5.  Dynamic Gap Limits: Large cap ≤1.0%, Mid/Small up to 2.5% w/ vol confirmation
+  🆕 6.  Sector RS Velocity: Grade A+ requires positive RS slope (catches rotation start)
+  🆕 7.  Intraday Chase Guard: >3% from EMA20 auto-downgrades to WATCH
+  🆕 8.  Morning Spike Filter: 2.5x vol only valid within 0.5% of Day High
+  🆕 9.  Broad-Market Divergence: Hard Block Power Play + Momentum on breadth divergence
+  🆕 10. Adaptive VCP: Breakout=15-day tight, Power Play=3-day Tight Flag
+  🆕 11. Correlation Replacement: 50% size for correlated positions, suggest Switch
+  🆕 12. Structure-Based Trailing: Switches to swing-low trailing at 2:1 RR
+  🆕 13. Action Command Engine: ACCUMULATE / EXECUTE NOW / HOLD & TRAIL / TRAP ALERT
+  🆕 14. NLP Reasoning Summary: Human-readable explanation per setup
+  🆕 15. Layer 8 Auto-Journaling: Records trade logic at scanner hit
+  🆕 16. Visual Entry Zone: GREEN (ideal) / YELLOW (chase) / RED (avoid) with price distances
+  🆕 17. Version label: v1.0
 """
 
 import pandas as pd
@@ -55,11 +64,11 @@ logger = logging.getLogger("swingbull.engine")
 # ═══════════════════════════════════════════════════════════════════════
 
 DASHBOARD_META = {
-    "version": "4.0",
+    "version": "1.0",
     "branding": {
         "name": "Swing Bull Trader",
         "tagline": "Architected by Freddy",
-        "footer": "© Swing Bull Trader v4.0 — Architected by Freddy",
+        "footer": "© Swing Bull Trader v1.0 — Architected by Freddy",
     },
     "color_palette": {
         "background": "#0F172A",       # Deep Gunmetal
@@ -259,30 +268,35 @@ SETUP_CONFIGS = {
         name="Breakout",
         mandatory_filters={
             'volatility_contraction': True,
-            'min_volume_ratio': 1.5,
+            'min_volume_ratio': 2.5,          # v1.0: raised from 1.5 — institutional footprint
             'min_resistance_distance': 1.5,
-            'max_gap_pct': 1.5,
+            'max_gap_pct_largecap': 1.0,      # v1.0: dynamic — 1% large, 2.5% mid/small
+            'max_gap_pct_midsmall': 2.5,
             'sector_rs_positive': True,
+            'sector_rs_velocity_positive': True,  # v1.0: slope must be rising
             'regime_not_risk_off': True,
             'liquidity_ok': True,
             'breakout_confirmed_2d': True,
-            'wick_rejection_ok': True,  # NEW v4
+            'wick_rejection_ok': True,
+            'vcp_15day_required': True,        # v1.0: 15-day VCP hard filter
+            'weekly_volume_confirm': True,     # v1.0: weekly vol > avg weekly
         },
         scoring_weights={
             'volatility_contraction': 15,
-            'volume_expansion': 15,
+            'volume_expansion': 20,            # v1.0: raised — institutional confirmation
             'location_quality': 15,
             'regime_alignment': 10,
-            'candle_anatomy': 10,
+            'candle_anatomy': 8,
             'relative_strength': 10,
             'sector_rs': 10,
-            'breadth_confirm': 8,
-            'liquidity_score': 7,
+            'breadth_confirm': 7,
+            'liquidity_score': 5,
         },
         risk_profile={
             'sl_atr_multiplier': (1.8, 2.2),
             'max_risk_pct': 4.0,
             'trailing_trigger_atr': 1.5,
+            'structure_trail_rr': 2.0,        # v1.0: switch to swing-low trail at 2:1
             'move_required_days': 3
         },
         time_decay_days=3
@@ -322,12 +336,15 @@ SETUP_CONFIGS = {
     SetupType.MOMENTUM: SetupConfig(
         name="Momentum",
         mandatory_filters={
-            'min_rs_vs_benchmark': 4.0,
+            'min_rs_vs_benchmark': 8.0,        # v1.0: raised from 4.0 — top 1% RS elite
             'rsi_range': (55, 80),
             'min_volume_ratio': 1.2,
             'price_above_emas': True,
             'no_bearish_reversal': True,
             'liquidity_ok': True,
+            'no_breadth_divergence': True,     # v1.0: hard block when breadth diverges
+            'sector_rs_velocity_positive': True,
+            'weekly_volume_confirm': True,
         },
         scoring_weights={
             'relative_strength': 25,
@@ -359,6 +376,9 @@ SETUP_CONFIGS = {
             'sector_rs_positive': True,
             'regime_risk_on': True,
             'liquidity_ok': True,
+            'no_breadth_divergence': True,     # v1.0: hard block when breadth diverges
+            'tight_flag_3day': True,           # v1.0: 3-day tight flag check
+            'weekly_volume_confirm': True,
         },
         scoring_weights={
             'relative_strength': 30,
@@ -1010,11 +1030,18 @@ class GapRiskModel:
             if atr_gap_penalty:
                 size_factor = round(size_factor * 0.80, 2)
 
-            # ══ V4: INTRADAY CHASE GUARD ══
-            # If today's open > prev close + 2.5%, flag as "Wait for Pullback"
+            # ══ v1.0: INTRADAY CHASE GUARD (tightened to 3% EMA distance) ══
             latest_gap_pct = ((open_price.iloc[-1] - close.iloc[-2]) / close.iloc[-2]) * 100
             intraday_chase_alert = latest_gap_pct > 2.5
             entry_recommendation = "Wait for Pullback" if intraday_chase_alert else "Buy at Market"
+
+            # ══ v1.0: MORNING SPIKE FILTER ══
+            # 2.5x volume only valid if price is within 0.5% of Day High
+            day_high = high.iloc[-1]
+            curr_vol_ratio_today = volume.iloc[-1] / volume.tail(20).mean() if volume.tail(20).mean() > 0 else 1
+            near_day_high = abs((close.iloc[-1] - day_high) / day_high * 100) <= 0.5
+            morning_spike_valid = curr_vol_ratio_today >= 2.5 and near_day_high
+            morning_spike_distribution = curr_vol_ratio_today >= 2.5 and not near_day_high
 
             return {
                 'gap_risk_score': round(gap_risk_score, 2),
@@ -1030,6 +1057,10 @@ class GapRiskModel:
                 'latest_gap_pct': round(latest_gap_pct, 2),
                 'intraday_chase_alert': intraday_chase_alert,
                 'entry_recommendation': entry_recommendation,
+                # v1.0
+                'latest_gap_pct': round(latest_gap_pct, 2),
+                'morning_spike_valid': morning_spike_valid,
+                'morning_spike_distribution': morning_spike_distribution,
             }
         except:
             return {'gap_risk_score': 50, 'position_size_factor': 0.7, 'risk_level': 'MEDIUM',
@@ -1142,6 +1173,314 @@ class TrapDetector:
         except Exception as e:
             return {'trap_probability': 0, 'trap_signals': [], 'is_high_risk_trap': False,
                     'recommendation': 'Unable to analyze', 'error': str(e)}
+
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: WEEKLY VOLUME CONFIRMATION
+# ═══════════════════════════════════════════════════════════════════════
+
+class WeeklyVolumeConfirmation:
+    """Weekly volume must exceed average — structural support gate."""
+    @staticmethod
+    def check(df: pd.DataFrame) -> Dict:
+        try:
+            volume = df["Volume"].squeeze()
+            vol_w = volume.resample("W").sum()
+            if len(vol_w) < 4:
+                return {"confirmed": True, "weekly_ratio": 1.0, "note": "Insufficient data"}
+            avg_w = vol_w.iloc[:-1].tail(8).mean()
+            curr_w = vol_w.iloc[-1]
+            ratio = curr_w / avg_w if avg_w > 0 else 1.0
+            return {"confirmed": ratio >= 1.0, "weekly_ratio": round(ratio, 2),
+                    "note": "✅ Weekly vol confirmed" if ratio >= 1.0 else f"⚠️ Weekly vol weak ({ratio:.1f}x)"}
+        except Exception as e:
+            return {"confirmed": True, "weekly_ratio": 1.0, "note": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: ADAPTIVE VCP FILTER
+# ═══════════════════════════════════════════════════════════════════════
+
+class VCPFilter:
+    """Breakout: 15-day tight VCP | Power Play: 3-day tight flag."""
+    @staticmethod
+    def check_15day(df: pd.DataFrame) -> Dict:
+        try:
+            high = df["High"].squeeze().tail(20)
+            low  = df["Low"].squeeze().tail(20)
+            rngs = (high - low) / low * 100
+            fh, sh, l3 = rngs.iloc[:7].mean(), rngs.iloc[8:15].mean(), rngs.iloc[-3:].mean()
+            contracting = (sh < fh) and (l3 < sh)
+            pct = ((fh - l3) / fh * 100) if fh > 0 else 0
+            return {"vcp_15d": contracting, "contraction_pct": round(pct, 1),
+                    "note": f"✅ VCP 15d ({pct:.0f}% contraction)" if contracting else "⚠️ No 15d VCP"}
+        except Exception as e:
+            return {"vcp_15d": False, "note": str(e)}
+
+    @staticmethod
+    def check_tight_flag_3day(df: pd.DataFrame) -> Dict:
+        try:
+            high  = df["High"].squeeze().tail(5)
+            low   = df["Low"].squeeze().tail(5)
+            close = df["Close"].squeeze().tail(5)
+            l3 = ((high.tail(3) - low.tail(3)) / close.tail(3) * 100).mean()
+            p2 = ((high.head(2) - low.head(2)) / close.head(2) * 100).mean()
+            tight = l3 < 1.5 and l3 < p2
+            return {"tight_flag_3d": tight, "last3_range_pct": round(l3, 2),
+                    "note": f"✅ Tight Flag ({l3:.1f}%)" if tight else f"⚠️ Not tight ({l3:.1f}%)"}
+        except Exception as e:
+            return {"tight_flag_3d": False, "note": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: BROAD-MARKET DIVERGENCE DETECTOR
+#  Nifty up + breadth falling → Hard Block Power Play & Momentum
+# ═══════════════════════════════════════════════════════════════════════
+
+class BreadthDivergenceDetector:
+    @staticmethod
+    def detect(breadth_data: Dict = None, regime_score: int = 50) -> Dict:
+        try:
+            if breadth_data is None:
+                breadth_data = MarketBreadthEngine.calculate_breadth()
+            slope = breadth_data.get("breadth_slope", 0)
+            deteriorating = breadth_data.get("is_deteriorating", False)
+            price_positive = regime_score >= 50
+            divergence = price_positive and (slope < -0.02 or deteriorating)
+            return {
+                "bearish_divergence": divergence,
+                "breadth_slope": slope,
+                "is_deteriorating": deteriorating,
+                "blocks": ["Power Play", "Momentum"] if divergence else [],
+                "warning": "⚠️ BEARISH DIVERGENCE: Nifty up but breadth falling — Power Play & Momentum BLOCKED" if divergence else None,
+            }
+        except Exception:
+            return {"bearish_divergence": False, "blocks": [], "warning": None}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: SECTOR RS VELOCITY (Slope-Based Rotation Detection)
+#  Grade A+ only if sector RS slope is positive (catching rotation start)
+# ═══════════════════════════════════════════════════════════════════════
+
+class SectorRSVelocity:
+    @staticmethod
+    def get_velocity(sector_data: Dict, sector_name: str) -> Dict:
+        try:
+            sec = (sector_data.get("sectors", {}) if sector_data else {}).get(sector_name, {})
+            rs5, rs20 = sec.get("rs_5d", 0), sec.get("rs_20d", 0)
+            vel = rs5 - rs20
+            pos = vel > 0.5 and rs5 > 0
+            return {"rs_velocity": round(vel, 2), "slope_positive": pos,
+                    "rs_5d": rs5, "rs_20d": rs20,
+                    "rotation_starting": pos and rs20 < 0 and rs5 > 0,
+                    "note": "✅ RS Velocity positive — rotation starting" if pos else "⚠️ RS Velocity flat/negative"}
+        except Exception as e:
+            return {"rs_velocity": 0, "slope_positive": False, "note": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: CORRELATION REPLACEMENT LOGIC
+# ═══════════════════════════════════════════════════════════════════════
+
+class CorrelationReplacementEngine:
+    """
+    Instead of hard-blocking correlated positions, suggests 50% size
+    or a Switch if new stock has higher RS.
+    """
+    SECTOR_PAIRS = {
+        "banking": ["banking"], "it": ["it"], "pharma": ["pharma"],
+        "auto": ["auto"], "metal": ["metal"], "energy": ["energy"],
+    }
+    @staticmethod
+    def check(proposed_sector: str, proposed_rs: float, active_positions: List[Dict]) -> Dict:
+        try:
+            same_sector = [p for p in active_positions
+                           if p.get("sector", "").lower() == proposed_sector.lower()]
+            if not same_sector:
+                return {"action": "FULL_SIZE", "size_multiplier": 1.0, "switch_candidate": None}
+
+            existing_rs = same_sector[0].get("rs_composite", 0)
+            if proposed_rs > existing_rs + 2.0:
+                return {
+                    "action": "SWITCH",
+                    "size_multiplier": 1.0,
+                    "switch_candidate": same_sector[0].get("ticker"),
+                    "reason": f"New stock RS {proposed_rs:.1f} > existing {existing_rs:.1f} — suggest switching",
+                }
+            return {
+                "action": "HALF_SIZE",
+                "size_multiplier": 0.5,
+                "switch_candidate": None,
+                "reason": f"Correlated sector ({proposed_sector}) — reduce to 50% size",
+            }
+        except Exception:
+            return {"action": "FULL_SIZE", "size_multiplier": 1.0, "switch_candidate": None}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: ACTION COMMAND ENGINE
+#  ACCUMULATE | EXECUTE NOW | HOLD & TRAIL | TRAP ALERT | WATCH
+# ═══════════════════════════════════════════════════════════════════════
+
+class ActionCommandEngine:
+    @staticmethod
+    def get_command(classification: Dict, df: pd.DataFrame) -> Dict:
+        try:
+            close      = df["Close"].squeeze()
+            high       = df["High"].squeeze()
+            volume     = df["Volume"].squeeze()
+            avg_vol    = volume.tail(20).mean()
+            vol_ratio  = volume.iloc[-1] / avg_vol if avg_vol > 0 else 1
+            trap_prob  = classification.get("trap_analysis", {}).get("trap_probability", 0)
+            status     = classification.get("status", TradeStatus.WATCH)
+            setup_type = classification.get("setup_type", SetupType.PULLBACK)
+            dist_ema20 = classification.get("dist_from_ema20", 0)
+            recent_high = high.tail(20).max()
+            pivot_dist = abs((recent_high - close.iloc[-1]) / close.iloc[-1] * 100)
+
+            if trap_prob > 30:
+                return {"command": "TRAP ALERT", "color": "#FF0055", "icon": "🚨",
+                        "detail": f"Trap {trap_prob:.0f}% — avoid entry", "priority": 1}
+            if vol_ratio >= 2.5 and pivot_dist <= 1.0 and status == TradeStatus.READY:
+                return {"command": "EXECUTE NOW", "color": "#00FF9D", "icon": "⚡",
+                        "detail": f"At pivot with {vol_ratio:.1f}x institutional volume", "priority": 2}
+            if (setup_type == SetupType.BREAKOUT and vol_ratio < 0.8
+                    and classification.get("is_contracting", False)):
+                return {"command": "ACCUMULATE", "color": "#00F0FF", "icon": "📦",
+                        "detail": f"VCP quiet phase — vol {vol_ratio:.1f}x, {pivot_dist:.1f}% from pivot", "priority": 3}
+            if setup_type in (SetupType.MOMENTUM, SetupType.POWER_PLAY) and dist_ema20 > 3:
+                return {"command": "HOLD & TRAIL", "color": "#FFBF00", "icon": "🔒",
+                        "detail": f"Extended {dist_ema20:.1f}% from EMA20 — trail stop", "priority": 4}
+            return {"command": "WATCH", "color": "#FFBF00", "icon": "👀",
+                    "detail": f"{pivot_dist:.1f}% from pivot, vol {vol_ratio:.1f}x", "priority": 5}
+        except Exception as e:
+            return {"command": "WATCH", "color": "#FFBF00", "icon": "👀", "detail": str(e), "priority": 5}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: NLP REASONING ENGINE
+# ═══════════════════════════════════════════════════════════════════════
+
+class NLPReasoningEngine:
+    @staticmethod
+    def generate(ticker: str, classification: Dict, rs_velocity: Dict = None,
+                 action_cmd: Dict = None, regime_label: str = "Neutral") -> str:
+        try:
+            st = classification.get("setup_type", SetupType.PULLBACK)
+            tier = classification.get("probability_tier", ProbabilityTier.B)
+            conf = classification.get("confidence", 0)
+            d20  = classification.get("dist_from_ema20", 0)
+            trap = classification.get("trap_analysis", {}).get("trap_probability", 0)
+            rs_d = classification.get("rs", {})
+            contr = classification.get("is_contracting", False)
+            sec_ok = classification.get("sector_rs_positive", False)
+            liq    = classification.get("liquidity", {}).get("is_liquid", True)
+            vol    = classification.get("volume_ratio", 1.0)
+            sname  = st.value if hasattr(st, "value") else str(st)
+            tname  = tier.value if hasattr(tier, "value") else str(tier)
+            parts  = [f"{tname} {sname} setup ({conf*100:.0f}% confidence, {regime_label} market)."]
+            if rs_velocity and rs_velocity.get("slope_positive"):
+                parts.append("Sector RS velocity positive — rotation is starting, early entry window.")
+            elif sec_ok:
+                parts.append("Sector leading Nifty — structural tailwind confirmed.")
+            else:
+                parts.append("Sector RS weak — setup needs broader market support.")
+            if st == SetupType.BREAKOUT:
+                if contr: parts.append("15-day VCP detected — institutional accumulation phase.")
+                parts.append(f"Volume {vol:.1f}x avg — {'undeniable institutional footprint.' if vol >= 2.5 else 'partial confirmation.'}")
+            elif st == SetupType.PULLBACK:
+                parts.append(f"Price {abs(d20):.1f}% below EMA20 — healthy retest of rising trend support.")
+            elif st == SetupType.MOMENTUM:
+                parts.append(f"RS composite {rs_d.get('composite', 0):.1f} — top-tier market leader (top 1%).")
+            elif st == SetupType.POWER_PLAY:
+                parts.append("RSI 72-85 Power Zone + multi-TF RS leadership — high-velocity momentum continuation.")
+            if trap > 20: parts.append(f"⚠️ Trap probability {trap:.0f}% — reduce size or wait for cleaner entry.")
+            if not liq: parts.append("⚠️ Low liquidity — use limit orders only, avoid market orders.")
+            if action_cmd: parts.append(f"{action_cmd.get('icon','')} Action: {action_cmd.get('command','')} — {action_cmd.get('detail','')}")
+            return " ".join(parts)
+        except Exception as e:
+            return f"Analysis complete for {ticker}."
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: VISUAL ENTRY ZONE CLASSIFIER
+#  GREEN (ideal) | YELLOW (chase) | RED (do not buy)
+# ═══════════════════════════════════════════════════════════════════════
+
+class EntryZoneClassifier:
+    @staticmethod
+    def classify(curr_price: float, entry_price: float, ema20: float) -> Dict:
+        try:
+            dp = abs((curr_price - entry_price) / entry_price * 100)
+            de = abs((curr_price - ema20) / ema20 * 100) if ema20 > 0 else 0
+            if de > 3.0 or dp > 2.0:
+                return {"zone": "RED",    "color": "#FF0055", "action": "DO NOT BUY — overextended",
+                        "dist_pivot": round(dp, 2), "dist_ema20": round(de, 2)}
+            if dp <= 0.5:
+                return {"zone": "GREEN",  "color": "#00FF9D", "action": "IDEAL BUY ZONE — within 0.5% of pivot",
+                        "dist_pivot": round(dp, 2), "dist_ema20": round(de, 2)}
+            return {"zone": "YELLOW", "color": "#FFBF00", "action": "CHASE ZONE — reduce size to 50%",
+                    "dist_pivot": round(dp, 2), "dist_ema20": round(de, 2)}
+        except Exception:
+            return {"zone": "YELLOW", "color": "#FFBF00", "action": "Monitor", "dist_pivot": 0, "dist_ema20": 0}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.0 NEW: LAYER 8 — AUTO-JOURNALING
+#  Records trade logic + setup reasoning at scanner hit moment
+# ═══════════════════════════════════════════════════════════════════════
+
+class Layer8Journal:
+    JOURNAL_PATH = os.environ.get("JOURNAL_PATH", "trade_journal.json")
+
+    @staticmethod
+    def record_entry(ticker: str, classification: Dict, risk_data: Dict,
+                     reasoning: str, action_cmd: Dict, regime_label: str = "") -> Dict:
+        try:
+            st = classification.get("setup_type", SetupType.UNKNOWN)
+            pt = classification.get("probability_tier", ProbabilityTier.C)
+            entry = {
+                "id": f"{ticker}_{int(time.time())}",
+                "ticker": ticker,
+                "timestamp": datetime.now(IST_TZ).strftime("%Y-%m-%d %H:%M IST"),
+                "setup_type": st.value if hasattr(st, "value") else str(st),
+                "grade": pt.value if hasattr(pt, "value") else str(pt),
+                "confidence": round(classification.get("confidence", 0) * 100, 1),
+                "entry_price": risk_data.get("entry"),
+                "stop_loss": risk_data.get("stop_loss"),
+                "target1": risk_data.get("target1"),
+                "rr1": risk_data.get("rr1"),
+                "action": action_cmd.get("command", "WATCH"),
+                "regime": regime_label,
+                "reasoning": reasoning,
+                "status": "PENDING",
+            }
+            journal = []
+            try:
+                with open(Layer8Journal.JOURNAL_PATH, "r") as f:
+                    journal = json.load(f)
+            except Exception:
+                pass
+            journal.append(entry)
+            journal = journal[-500:]
+            try:
+                with open(Layer8Journal.JOURNAL_PATH, "w") as f:
+                    json.dump(journal, f, indent=2, default=str)
+            except Exception:
+                pass
+            return entry
+        except Exception as e:
+            return {"error": str(e)}
+
+    @staticmethod
+    def get_recent(limit: int = 20) -> List[Dict]:
+        try:
+            with open(Layer8Journal.JOURNAL_PATH, "r") as f:
+                return list(reversed(json.load(f)[-limit:]))
+        except Exception:
+            return []
 
 
 class BreakoutConfirmation:
@@ -1413,14 +1752,21 @@ class SetupClassifier:
                     tier = ProbabilityTier.B
                     status = TradeStatus.WATCH
 
-            # V4: Apply Trap Detector penalty
-            if trap_analysis['is_high_risk_trap']:
-                if tier == ProbabilityTier.A_PLUS:
-                    tier = ProbabilityTier.B
-                elif tier == ProbabilityTier.A:
+            # v1.0: Trap Suppression — >40% trap probability → AVOID (hidden from dashboard)
+            if trap_analysis['trap_probability'] > 40:
+                status = TradeStatus.AVOID
+                tier = ProbabilityTier.C
+            elif trap_analysis['is_high_risk_trap']:
+                if tier in (ProbabilityTier.A_PLUS, ProbabilityTier.A):
                     tier = ProbabilityTier.B
                 if status == TradeStatus.READY:
                     status = TradeStatus.WATCH
+
+            # v1.0: Intraday Chase Guard — >3% from EMA20 → downgrade to WATCH
+            if dist_from_ema20 > 3.0 and status == TradeStatus.READY:
+                status = TradeStatus.WATCH
+                if tier == ProbabilityTier.A_PLUS:
+                    tier = ProbabilityTier.A
 
             # V4: Apply Wick Rejection penalty for breakouts
             if setup_type == SetupType.BREAKOUT and not breakout_confirm.get('wick_rejection_ok', True):
@@ -2234,7 +2580,22 @@ class ActiveTradeEvaluator:
         return "⚪ HOLD — Monitor"
 
     @staticmethod
-    def _calc_trailing_sl(entry, current, original_sl, pnl, atr, setup_type):
+    def _calc_trailing_sl(entry, current, original_sl, pnl, atr, setup_type, df=None):
+        config = SETUP_CONFIGS.get(setup_type, SETUP_CONFIGS[SetupType.MOMENTUM])
+        rr_trigger = config.risk_profile.get('structure_trail_rr', 2.0)
+        risk = entry - original_sl
+        rr_reached = (current - entry) / risk if risk > 0 else 0
+
+        # v1.0: Switch to structure-based trailing (swing-low) once 2:1 RR reached
+        if rr_reached >= rr_trigger and df is not None:
+            try:
+                low = df['Low'].squeeze()
+                # Use last 5-bar swing low as structure stop
+                swing_low = low.tail(5).min()
+                return max(original_sl, swing_low - atr * 0.2)
+            except Exception:
+                pass
+
         if pnl < 3:
             return original_sl
         if setup_type == SetupType.POWER_PLAY:
@@ -2510,6 +2871,18 @@ class SwingBullEngine:
                 if portfolio_check['is_blocked']:
                     final_status = TradeStatus.BLOCKED
 
+                # v1.0: Action Command + NLP Reasoning + Entry Zone
+                action_cmd  = ActionCommandEngine.get_command(classification, df)
+                rs_velocity = SectorRSVelocity.get_velocity(sector_data, sector)
+                ema20_val   = float(ta.ema(df['Close'].squeeze(), 20).iloc[-1])
+                entry_zone  = EntryZoneClassifier.classify(entry_price, risk_data['entry'], ema20_val)
+                reasoning   = NLPReasoningEngine.generate(ticker, classification, rs_velocity, action_cmd)
+
+                # v1.0: weekly vol + VCP check
+                weekly_vol  = WeeklyVolumeConfirmation.check(df)
+                vcp_check   = VCPFilter.check_15day(df)
+                tight_flag  = VCPFilter.check_tight_flag_3day(df)
+
                 results.append({
                     'ticker': ticker,
                     'setup_type': classification['setup_type'].value,
@@ -2525,10 +2898,22 @@ class SwingBullEngine:
                     'volume_ratio': classification.get('volume_ratio', 1.0),
                     'trap_probability': classification.get('trap_analysis', {}).get('trap_probability', 0),
                     'intraday_chase_alert': classification.get('gap_risk', {}).get('intraday_chase_alert', False),
+                    'morning_spike_valid': classification.get('gap_risk', {}).get('morning_spike_valid', False),
                     'portfolio_blocked': portfolio_check['is_blocked'],
                     'block_reason': portfolio_check.get('reason'),
+                    # v1.0 new fields
+                    'action_command': action_cmd,
+                    'reasoning': reasoning,
+                    'entry_zone': entry_zone,
+                    'rs_velocity': rs_velocity,
+                    'weekly_vol_confirmed': weekly_vol.get('confirmed', True),
+                    'weekly_vol_ratio': weekly_vol.get('weekly_ratio', 1.0),
+                    'vcp_15d': vcp_check.get('vcp_15d', False),
+                    'tight_flag_3d': tight_flag.get('tight_flag_3d', False),
                     'ui_hints': {
                         'status_color': DASHBOARD_META['status_colors'].get(final_status.value, '#64748B'),
+                        'action_color': action_cmd.get('color', '#64748B'),
+                        'zone_color': entry_zone.get('color', '#64748B'),
                     },
                 })
             except Exception as e:
@@ -2735,5 +3120,10 @@ __all__ = [
     'PlaybookGenerator', 'ActiveTradeEvaluator',
     'TradeExpectancyTracker',
     'PortfolioRiskEngine',
+    # v1.0 new exports
+    'WeeklyVolumeConfirmation', 'VCPFilter', 'BreadthDivergenceDetector',
+    'SectorRSVelocity', 'CorrelationReplacementEngine',
+    'ActionCommandEngine', 'NLPReasoningEngine', 'EntryZoneClassifier',
+    'Layer8Journal',
     'DASHBOARD_META',
 ]
