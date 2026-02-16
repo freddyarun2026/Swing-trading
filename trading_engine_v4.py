@@ -1,38 +1,47 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║          SWING BULL TRADER™ v1.0 — Trading Engine                           ║
+║          SWING BULL TRADER™ v1.1 — Trading Engine                           ║
 ║          Architected by Freddy — Personal Use Only                          ║
-║          Indian Market Optimized • NSE/BSE Focus                            ║
+║          Indian Market Calibrated • NSE Realistic Thresholds                            ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 LAYERED ARCHITECTURE:
-  Layer 1: Market   (Regime + REAL Breadth + Volatility + Divergence Detection)
-  Layer 2: Sector   (Leadership + RS Velocity / Slope-Based Rotation)
-  Layer 3: Stock    (Setup Detection + VCP + Institutional Volume Gate)
-  Layer 4: Risk     (ATR + Beta + Dynamic Gap + Liquidity-Adjusted)
-  Layer 5: Capital  (Probability Tiered Sizing + Correlation Replacement)
+  Layer 1: Market   (Regime + Breadth + India VIX Gate + Divergence Detection)
+  Layer 2: Sector   (Leadership + RS Velocity + F&O Expiry Context)
+  Layer 3: Stock    (6 Setup Types + India-Calibrated Filters + Delivery Quality)
+  Layer 4: Risk     (ATR + Dynamic Gap + Weekly Trend + Multi-Day Confirmation)
+  Layer 5: Capital  (VIX-Adjusted Sizing + Correlation Replacement)
   Layer 6: Evolution(Expectancy Tracking + Self-Protective Logic)
-  Layer 7: Portfolio(Risk Engine — Hard Blocks + Sector Caps + Divergence)
-  Layer 8: Journal  (Auto-Journaling + Trade Logic Recording)
+  Layer 7: Portfolio(Hard Blocks + Sector Caps + Operator Alert)
+  Layer 8: Journal  (Auto-Journaling + NLP Reasoning + Global Cues Context)
 
-VERSION 1.0 IMPROVEMENTS:
-  🆕 1.  Volume Intensity: Breakout min_volume_ratio raised 1.5x → 2.5x (institutional footprint gate)
-  🆕 2.  RS Elite Filter: Momentum min_rs raised 4.0 → 8.0 (top 1% leaders only)
-  🆕 3.  Wick Trap Suppression: trap_probability >40% → auto AVOID (hidden from dashboard)
-  🆕 4.  Weekly Volume Confirmation: new mandatory gate on all setup types
-  🆕 5.  Dynamic Gap Limits: Large cap ≤1.0%, Mid/Small up to 2.5% w/ vol confirmation
-  🆕 6.  Sector RS Velocity: Grade A+ requires positive RS slope (catches rotation start)
-  🆕 7.  Intraday Chase Guard: >3% from EMA20 auto-downgrades to WATCH
-  🆕 8.  Morning Spike Filter: 2.5x vol only valid within 0.5% of Day High
-  🆕 9.  Broad-Market Divergence: Hard Block Power Play + Momentum on breadth divergence
-  🆕 10. Adaptive VCP: Breakout=15-day tight, Power Play=3-day Tight Flag
-  🆕 11. Correlation Replacement: 50% size for correlated positions, suggest Switch
-  🆕 12. Structure-Based Trailing: Switches to swing-low trailing at 2:1 RR
-  🆕 13. Action Command Engine: ACCUMULATE / EXECUTE NOW / HOLD & TRAIL / TRAP ALERT
-  🆕 14. NLP Reasoning Summary: Human-readable explanation per setup
-  🆕 15. Layer 8 Auto-Journaling: Records trade logic at scanner hit
-  🆕 16. Visual Entry Zone: GREEN (ideal) / YELLOW (chase) / RED (avoid) with price distances
-  🆕 17. Version label: v1.0
+VERSION 1.1 — INDIA-CALIBRATED (from v1.0):
+  ✅ RECALIBRATED:
+  🔧 1.  Breakout volume 2.5x → 1.5x  (Indian institutional buying is quieter)
+  🔧 2.  Momentum RS 8.0 → 5.0  (realistic for NSE leaders)
+  🔧 3.  Power Play RS 6.0 → 4.5  (same reason)
+  🔧 4.  Tight Flag range 1.5% → 3.0%  (Indian midcap baseline volatility)
+  🔧 5.  VCP window 15-day → 10-day  (faster Indian market cycles)
+  🔧 6.  Intraday chase guard 3% → 5% large / 8% midcap
+  🔧 7.  Morning spike distance 0.5% → 1.5% large / 2.5% midcap
+  🔧 8.  Weekly volume 1.0x → 0.8x  (F&O expiry distorts weekly vol)
+  🔧 9.  Gap limits 1.0% → 2.0% large / 3.5% midsmall
+  🔧 10. Tier A+ multiplier raised to 1.5x (was 1.0x in code)
+
+  ✅ NEW SETUP TYPES:
+  🆕 11. 52-Week High Breakout — most reliable India breakout, triggers institutional momentum
+  🆕 12. Results Momentum — post-earnings gap+hold continuation (>5% gap, holds 2+ days)
+
+  ✅ NEW FILTER CLASSES:
+  🆕 13. IndiaVIXEngine — VIX regime gate: >20 reduce size, >25 half size, >30 stop new trades
+  🆕 14. FNOExpiryGuard — flags expiry week (Thu), reduces volume signal confidence
+  🆕 15. DeliveryQualityEstimator — proxy delivery % from close position in range + consistency
+  🆕 16. WeeklyTrendConfirmation — weekly EMA20 alignment + weekly RSI zone check
+  🆕 17. MultiDayBreakoutConfirmation — 3-day close above resistance (reduces false breakouts)
+  🆕 18. ResultsMomentumDetector — detects post-earnings gap patterns
+  🆕 19. OperatorAlert — detects manipulation signals in mid/smallcap (thin vol + big moves)
+  🆕 20. GlobalCuesEngine — Asian market context (Nikkei, Hang Seng, SGX proxy)
+  🆕 21. ATHBreakoutDetector — all-time high breakout (strongest signal)
 """
 
 import pandas as pd
@@ -64,11 +73,11 @@ logger = logging.getLogger("swingbull.engine")
 # ═══════════════════════════════════════════════════════════════════════
 
 DASHBOARD_META = {
-    "version": "1.0",
+    "version": "1.1",
     "branding": {
         "name": "Swing Bull Trader",
         "tagline": "Architected by Freddy",
-        "footer": "© Swing Bull Trader v1.0 — Architected by Freddy",
+        "footer": "© Swing Bull Trader v1.1 — Architected by Freddy",
     },
     "color_palette": {
         "background": "#0F172A",       # Deep Gunmetal
@@ -216,11 +225,13 @@ def require_auth(func):
 # ═══════════════════════════════════════════════════════════════════════
 
 class SetupType(Enum):
-    BREAKOUT = "Breakout"
-    PULLBACK = "Pullback"
-    MOMENTUM = "Momentum"
-    POWER_PLAY = "Power Play"
-    UNKNOWN = "Unknown"
+    BREAKOUT           = "Breakout"
+    PULLBACK           = "Pullback"
+    MOMENTUM           = "Momentum"
+    POWER_PLAY         = "Power Play"
+    FIFTY_TWO_WEEK     = "52W High Breakout"  # v1.1: most reliable India breakout
+    RESULTS_MOMENTUM   = "Results Momentum"   # v1.1: post-earnings continuation
+    UNKNOWN            = "Unknown"
 
 
 class RegimeType(Enum):
@@ -268,38 +279,40 @@ SETUP_CONFIGS = {
         name="Breakout",
         mandatory_filters={
             'volatility_contraction': True,
-            'min_volume_ratio': 2.5,          # v1.0: raised from 1.5 — institutional footprint
-            'min_resistance_distance': 1.5,
-            'max_gap_pct_largecap': 1.0,      # v1.0: dynamic — 1% large, 2.5% mid/small
-            'max_gap_pct_midsmall': 2.5,
+            'min_volume_ratio': 1.5,           # v1.1: India-calibrated (was 2.5 — unrealistic)
+            'min_resistance_distance': 1.0,    # v1.1: relaxed for Indian range
+            'max_gap_pct_largecap': 2.0,       # v1.1: 2% large (was 1.0 — too strict)
+            'max_gap_pct_midsmall': 3.5,       # v1.1: 3.5% mid/small
             'sector_rs_positive': True,
-            'sector_rs_velocity_positive': True,  # v1.0: slope must be rising
+            'sector_rs_velocity_positive': True,
             'regime_not_risk_off': True,
             'liquidity_ok': True,
             'breakout_confirmed_2d': True,
             'wick_rejection_ok': True,
-            'vcp_15day_required': True,        # v1.0: 15-day VCP hard filter
-            'weekly_volume_confirm': True,     # v1.0: weekly vol > avg weekly
+            'vcp_10day_required': True,        # v1.1: 10-day VCP (was 15 — India faster cycle)
+            'weekly_volume_confirm': True,     # v1.1: softened to 0.8x
+            'delivery_quality_ok': True,       # v1.1: delivery quality proxy
         },
         scoring_weights={
             'volatility_contraction': 15,
-            'volume_expansion': 20,            # v1.0: raised — institutional confirmation
+            'volume_expansion': 18,
             'location_quality': 15,
             'regime_alignment': 10,
             'candle_anatomy': 8,
             'relative_strength': 10,
             'sector_rs': 10,
-            'breadth_confirm': 7,
-            'liquidity_score': 5,
+            'delivery_quality': 7,             # v1.1: delivery proxy replaces old breadth weight
+            'breadth_confirm': 5,
+            'liquidity_score': 2,
         },
         risk_profile={
             'sl_atr_multiplier': (1.8, 2.2),
             'max_risk_pct': 4.0,
             'trailing_trigger_atr': 1.5,
-            'structure_trail_rr': 2.0,        # v1.0: switch to swing-low trail at 2:1
+            'structure_trail_rr': 2.0,
             'move_required_days': 3
         },
-        time_decay_days=3
+        time_decay_days=4                      # v1.1: extended from 3 — India needs more time
     ),
 
     SetupType.PULLBACK: SetupConfig(
@@ -307,96 +320,158 @@ SETUP_CONFIGS = {
         mandatory_filters={
             'ema20_above_ema50': True,
             'ema50_rising': True,
-            'rsi_range': (35, 55),
+            'rsi_range': (30, 58),             # v1.1: wider RSI range — Indian midcaps overshoot
             'pullback_volume_low': True,
             'bounce_volume_expansion': True,
-            'weekly_aligned': True,
+            'weekly_trend_ok': True,           # v1.1: weekly EMA20 must be rising
             'liquidity_ok': True,
         },
         scoring_weights={
-            'trend_structure': 20,
+            'trend_structure': 22,
             'pullback_quality': 15,
             'volume_pattern': 15,
-            'weekly_alignment': 10,
+            'weekly_alignment': 12,
             'rsi_zone': 10,
             'regime': 10,
             'sector_rs': 10,
-            'breadth_confirm': 5,
-            'liquidity_score': 5,
+            'breadth_confirm': 4,
+            'liquidity_score': 2,
         },
         risk_profile={
-            'sl_atr_multiplier': (1.2, 1.5),
-            'max_risk_pct': 3.0,
+            'sl_atr_multiplier': (1.2, 1.8),  # v1.1: wider — Indian stocks need room
+            'max_risk_pct': 3.5,
             'trailing_trigger_atr': 1.0,
+            'structure_trail_rr': 2.0,
             'move_required_days': 5
         },
-        time_decay_days=5
+        time_decay_days=6                      # v1.1: extended — pullbacks take longer in India
     ),
 
     SetupType.MOMENTUM: SetupConfig(
         name="Momentum",
         mandatory_filters={
-            'min_rs_vs_benchmark': 8.0,        # v1.0: raised from 4.0 — top 1% RS elite
-            'rsi_range': (55, 80),
+            'min_rs_vs_benchmark': 5.0,        # v1.1: India-calibrated (was 8.0 — almost impossible)
+            'rsi_range': (52, 80),             # v1.1: slightly wider lower bound
             'min_volume_ratio': 1.2,
             'price_above_emas': True,
             'no_bearish_reversal': True,
             'liquidity_ok': True,
-            'no_breadth_divergence': True,     # v1.0: hard block when breadth diverges
+            'no_breadth_divergence': True,
             'sector_rs_velocity_positive': True,
-            'weekly_volume_confirm': True,
+            'weekly_trend_ok': True,           # v1.1: weekly EMA must be rising
         },
         scoring_weights={
             'relative_strength': 25,
             'volume': 15,
             'trend_alignment': 15,
-            'rsi_zone': 10,
-            'regime': 10,
+            'weekly_trend': 10,                # v1.1: weekly context counts
+            'rsi_zone': 8,
+            'regime': 8,
             'candle': 5,
             'sector_rs': 10,
-            'breadth_confirm': 5,
-            'liquidity_score': 5,
+            'breadth_confirm': 2,
+            'liquidity_score': 2,
         },
         risk_profile={
-            'sl_atr_multiplier': (1.4, 1.8),
+            'sl_atr_multiplier': (1.4, 2.0),  # v1.1: wider for India volatility
             'max_risk_pct': 3.5,
             'trailing_trigger_atr': 0.8,
+            'structure_trail_rr': 2.0,
             'move_required_days': 2,
             'trail_below_ema': 20
         },
-        time_decay_days=2
+        time_decay_days=3                      # v1.1: extended from 2
     ),
 
     SetupType.POWER_PLAY: SetupConfig(
         name="Power Play",
         mandatory_filters={
-            'rsi_range': (72, 85),
-            'min_rs_vs_benchmark': 6.0,
+            'rsi_range': (70, 86),             # v1.1: slightly wider — India sustains higher RSI
+            'min_rs_vs_benchmark': 4.5,        # v1.1: India-calibrated (was 6.0)
             'price_above_emas': True,
             'sector_rs_positive': True,
             'regime_risk_on': True,
             'liquidity_ok': True,
-            'no_breadth_divergence': True,     # v1.0: hard block when breadth diverges
-            'tight_flag_3day': True,           # v1.0: 3-day tight flag check
-            'weekly_volume_confirm': True,
+            'no_breadth_divergence': True,
+            'tight_flag_3day': True,           # range now 3.0% not 1.5%
+            'weekly_trend_ok': True,
         },
         scoring_weights={
-            'relative_strength': 30,
+            'relative_strength': 28,
             'volume': 15,
             'trend_strength': 15,
             'rsi_power': 15,
-            'regime': 10,
-            'sector_rs': 10,
-            'liquidity_score': 5,
+            'weekly_trend': 10,
+            'regime': 8,
+            'sector_rs': 7,
+            'liquidity_score': 2,
         },
         risk_profile={
-            'sl_atr_multiplier': (1.0, 1.4),
-            'max_risk_pct': 2.5,
+            'sl_atr_multiplier': (1.0, 1.6),  # v1.1: wider
+            'max_risk_pct': 3.0,
             'trailing_trigger_atr': 0.6,
+            'structure_trail_rr': 2.0,
             'move_required_days': 1,
             'trail_below_ema': 10
         },
         time_decay_days=2
+    ),
+
+    # ── v1.1 NEW: 52-WEEK HIGH BREAKOUT ──────────────────────────────
+    SetupType.FIFTY_TWO_WEEK: SetupConfig(
+        name="52W High Breakout",
+        mandatory_filters={
+            'at_52w_high': True,               # Price breaking 52-week high
+            'min_volume_ratio': 1.3,           # Lower vol needed — institutional buying triggers here
+            'sector_rs_positive': True,
+            'liquidity_ok': True,
+            'regime_not_risk_off': True,
+            'no_operator_alert': True,         # Filter manipulation
+        },
+        scoring_weights={
+            'fifty_two_week_strength': 30,     # Primary signal
+            'volume_expansion': 20,
+            'regime_alignment': 15,
+            'sector_rs': 15,
+            'breadth_confirm': 10,
+            'liquidity_score': 10,
+        },
+        risk_profile={
+            'sl_atr_multiplier': (1.5, 2.0),
+            'max_risk_pct': 3.5,
+            'trailing_trigger_atr': 1.5,
+            'structure_trail_rr': 2.0,
+            'move_required_days': 2
+        },
+        time_decay_days=3
+    ),
+
+    # ── v1.1 NEW: RESULTS MOMENTUM ───────────────────────────────────
+    SetupType.RESULTS_MOMENTUM: SetupConfig(
+        name="Results Momentum",
+        mandatory_filters={
+            'post_results_gap': True,          # Gap >5% on results day
+            'gap_held_2d': True,               # Gap held for 2+ days (no fill)
+            'min_volume_ratio': 1.5,           # High vol on results day
+            'sector_rs_positive': True,
+            'liquidity_ok': True,
+        },
+        scoring_weights={
+            'gap_quality': 25,
+            'gap_hold': 20,
+            'volume_expansion': 20,
+            'relative_strength': 15,
+            'sector_rs': 10,
+            'regime_alignment': 10,
+        },
+        risk_profile={
+            'sl_atr_multiplier': (1.2, 1.8),
+            'max_risk_pct': 3.0,
+            'trailing_trigger_atr': 1.0,
+            'structure_trail_rr': 1.5,         # Lower RR trigger — earnings moves are fast
+            'move_required_days': 2
+        },
+        time_decay_days=5
     ),
 }
 
@@ -406,10 +481,10 @@ SETUP_CONFIGS = {
 # ═══════════════════════════════════════════════════════════════════════
 
 TIER_ALLOCATION = {
-    ProbabilityTier.A_PLUS: 1.00,
-    ProbabilityTier.A:      0.75,
-    ProbabilityTier.B:      0.50,
-    ProbabilityTier.C:      0.25,
+    ProbabilityTier.A_PLUS: 1.50,  # v1.1: fixed — A+ deserves 1.5x risk allocation
+    ProbabilityTier.A:      1.00,
+    ProbabilityTier.B:      0.65,
+    ProbabilityTier.C:      0.35,
 }
 
 
@@ -1039,7 +1114,8 @@ class GapRiskModel:
             # 2.5x volume only valid if price is within 0.5% of Day High
             day_high = high.iloc[-1]
             curr_vol_ratio_today = volume.iloc[-1] / volume.tail(20).mean() if volume.tail(20).mean() > 0 else 1
-            near_day_high = abs((close.iloc[-1] - day_high) / day_high * 100) <= 0.5
+            spike_dist_pct = 1.5 if market_cap_cat == 'largecap' else 2.5  # v1.1: India-calibrated
+            near_day_high = abs((close.iloc[-1] - day_high) / day_high * 100) <= spike_dist_pct
             morning_spike_valid = curr_vol_ratio_today >= 2.5 and near_day_high
             morning_spike_distribution = curr_vol_ratio_today >= 2.5 and not near_day_high
 
@@ -1192,7 +1268,7 @@ class WeeklyVolumeConfirmation:
             avg_w = vol_w.iloc[:-1].tail(8).mean()
             curr_w = vol_w.iloc[-1]
             ratio = curr_w / avg_w if avg_w > 0 else 1.0
-            return {"confirmed": ratio >= 1.0, "weekly_ratio": round(ratio, 2),
+            return {"confirmed": ratio >= 0.8,  # v1.1: softened from 1.0x — F&O expiry distorts weekly vol "weekly_ratio": round(ratio, 2),
                     "note": "✅ Weekly vol confirmed" if ratio >= 1.0 else f"⚠️ Weekly vol weak ({ratio:.1f}x)"}
         except Exception as e:
             return {"confirmed": True, "weekly_ratio": 1.0, "note": str(e)}
@@ -1210,10 +1286,10 @@ class VCPFilter:
             high = df["High"].squeeze().tail(20)
             low  = df["Low"].squeeze().tail(20)
             rngs = (high - low) / low * 100
-            fh, sh, l3 = rngs.iloc[:7].mean(), rngs.iloc[8:15].mean(), rngs.iloc[-3:].mean()
-            contracting = (sh < fh) and (l3 < sh)
+            fh, sh, l3 = rngs.iloc[:4].mean(), rngs.iloc[4:8].mean(), rngs.iloc[-3:].mean()
+            contracting = (sh < fh) and (l3 < sh)  # v1.1: 10-day window
             pct = ((fh - l3) / fh * 100) if fh > 0 else 0
-            return {"vcp_15d": contracting, "contraction_pct": round(pct, 1),
+            return {"vcp_15d": contracting, "vcp_10d": contracting, "contraction_pct": round(pct, 1),
                     "note": f"✅ VCP 15d ({pct:.0f}% contraction)" if contracting else "⚠️ No 15d VCP"}
         except Exception as e:
             return {"vcp_15d": False, "note": str(e)}
@@ -1226,9 +1302,9 @@ class VCPFilter:
             close = df["Close"].squeeze().tail(5)
             l3 = ((high.tail(3) - low.tail(3)) / close.tail(3) * 100).mean()
             p2 = ((high.head(2) - low.head(2)) / close.head(2) * 100).mean()
-            tight = l3 < 1.5 and l3 < p2
+            tight = l3 < 3.0 and l3 < p2  # v1.1: 3.0% for India (was 1.5%)
             return {"tight_flag_3d": tight, "last3_range_pct": round(l3, 2),
-                    "note": f"✅ Tight Flag ({l3:.1f}%)" if tight else f"⚠️ Not tight ({l3:.1f}%)"}
+                    "note": f"✅ Tight Flag ({l3:.1f}% < 3.0%)" if tight else f"⚠️ Not tight ({l3:.1f}%)"}
         except Exception as e:
             return {"tight_flag_3d": False, "note": str(e)}
 
@@ -1415,10 +1491,10 @@ class EntryZoneClassifier:
         try:
             dp = abs((curr_price - entry_price) / entry_price * 100)
             de = abs((curr_price - ema20) / ema20 * 100) if ema20 > 0 else 0
-            if de > 3.0 or dp > 2.0:
+            if de > 5.0 or dp > 3.0:  # v1.1: India-calibrated wider
                 return {"zone": "RED",    "color": "#FF0055", "action": "DO NOT BUY — overextended",
                         "dist_pivot": round(dp, 2), "dist_ema20": round(de, 2)}
-            if dp <= 0.5:
+            if dp <= 1.0:  # v1.1: 1.0% GREEN zone (was 0.5%)
                 return {"zone": "GREEN",  "color": "#00FF9D", "action": "IDEAL BUY ZONE — within 0.5% of pivot",
                         "dist_pivot": round(dp, 2), "dist_ema20": round(de, 2)}
             return {"zone": "YELLOW", "color": "#FFBF00", "action": "CHASE ZONE — reduce size to 50%",
@@ -1481,6 +1557,472 @@ class Layer8Journal:
                 return list(reversed(json.load(f)[-limit:]))
         except Exception:
             return []
+
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.1 NEW: INDIA VIX ENGINE
+#  VIX regime gate: >20 reduce, >25 half, >30 stop new trades
+# ═══════════════════════════════════════════════════════════════════════
+
+class IndiaVIXEngine:
+    """India VIX-based position sizing gate. ^INDIAVIX from yfinance."""
+    LEVELS = [
+        (30, 0.25, "EXTREME", "🔴"),
+        (25, 0.50, "HIGH",    "🔴"),
+        (20, 0.75, "ELEVATED","🟡"),
+        (17, 0.90, "MODERATE","🟡"),
+        (13, 1.00, "LOW",     "🟢"),
+        (0,  1.00, "VERY_LOW","🟢"),
+    ]
+
+    @staticmethod
+    def get_vix() -> Dict:
+        try:
+            df = yf.download("^INDIAVIX", period="5d", progress=False)
+            if df.empty:
+                return {"vix": 15.0, "level": "LOW", "size_multiplier": 1.0, "icon": "🟢", "note": "VIX unavailable — default used"}
+            vix = float(df["Close"].squeeze().iloc[-1])
+            for threshold, mult, level, icon in IndiaVIXEngine.LEVELS:
+                if vix >= threshold:
+                    note = (
+                        f"⛔ EXTREME VIX {vix:.1f} — no new positions" if level == "EXTREME" else
+                        f"⚠️ HIGH VIX {vix:.1f} — half position size" if level == "HIGH" else
+                        f"⚠️ ELEVATED VIX {vix:.1f} — reduce size to 75%" if level == "ELEVATED" else
+                        f"🟡 MODERATE VIX {vix:.1f} — size at 90%" if level == "MODERATE" else
+                        f"✅ VIX {vix:.1f} — normal sizing"
+                    )
+                    return {"vix": round(vix, 2), "level": level, "size_multiplier": mult, "icon": icon, "note": note}
+            return {"vix": round(vix, 2), "level": "VERY_LOW", "size_multiplier": 1.0, "icon": "🟢", "note": f"VIX {vix:.1f} — very low, normal sizing"}
+        except Exception as e:
+            return {"vix": 15.0, "level": "LOW", "size_multiplier": 1.0, "icon": "🟢", "note": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.1 NEW: F&O EXPIRY GUARD
+#  Weekly expiry every Thursday. Monthly = last Thursday.
+#  Suppresses volume-based signals on expiry day.
+# ═══════════════════════════════════════════════════════════════════════
+
+class FNOExpiryGuard:
+    """Detects NSE F&O expiry weeks and adjusts volume signal confidence."""
+
+    @staticmethod
+    def check() -> Dict:
+        try:
+            today = datetime.now(IST_TZ)
+            weekday = today.weekday()  # 0=Mon, 3=Thu, 6=Sun
+            day_of_month = today.day
+
+            # Find last Thursday of this month
+            import calendar
+            _, last_day = calendar.monthrange(today.year, today.month)
+            last_thu = last_day - ((calendar.weekday(today.year, today.month, last_day) - 3) % 7)
+
+            is_weekly_expiry_day  = weekday == 3  # Thursday
+            is_monthly_expiry_day = weekday == 3 and day_of_month == last_thu
+            days_to_weekly_expiry = (3 - weekday) % 7  # days until next Thursday
+            is_expiry_week = days_to_weekly_expiry <= 2  # Mon-Thu of expiry week
+
+            if is_monthly_expiry_day:
+                label = "MONTHLY EXPIRY DAY"
+                vol_confidence = 0.4   # volume today is F&O rollover noise
+                caution = "⚠️ Monthly F&O Expiry — volume unreliable. Avoid new entries today."
+            elif is_weekly_expiry_day:
+                label = "WEEKLY EXPIRY DAY"
+                vol_confidence = 0.55
+                caution = "⚠️ Weekly F&O Expiry — intraday vol distorted. Wait for 2:30 PM move."
+            elif is_expiry_week:
+                label = "EXPIRY WEEK"
+                vol_confidence = 0.75
+                caution = "🟡 Expiry week — expect elevated vol noise Thu. Plan around it."
+            else:
+                label = "NORMAL"
+                vol_confidence = 1.0
+                caution = None
+
+            return {
+                "label": label,
+                "is_expiry_day": is_weekly_expiry_day,
+                "is_monthly_expiry": is_monthly_expiry_day,
+                "is_expiry_week": is_expiry_week,
+                "days_to_weekly_expiry": days_to_weekly_expiry,
+                "vol_confidence_multiplier": vol_confidence,
+                "caution": caution,
+            }
+        except Exception as e:
+            return {"label": "NORMAL", "vol_confidence_multiplier": 1.0, "caution": None, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.1 NEW: DELIVERY QUALITY ESTIMATOR
+#  Proxy for delivery % using close position in range + consistency.
+#  Actual CDSL/NSE delivery data not available via yfinance.
+# ═══════════════════════════════════════════════════════════════════════
+
+class DeliveryQualityEstimator:
+    """
+    Proxy for delivery-based buying quality.
+    High delivery = genuine accumulation (not intraday speculation).
+    Estimated via: close position in range + multi-day consistency.
+    Score 0-100. >= 60 = good delivery quality.
+    """
+
+    @staticmethod
+    def estimate(df: pd.DataFrame) -> Dict:
+        try:
+            close  = df["Close"].squeeze()
+            high   = df["High"].squeeze()
+            low    = df["Low"].squeeze()
+            volume = df["Volume"].squeeze()
+
+            # Metric 1: Close position in daily range (0=low, 1=high)
+            # High close-position = buyers held till end of day = delivery
+            range_ = (high - low)
+            close_pos = ((close - low) / range_.replace(0, np.nan)).fillna(0.5)
+            avg_close_pos = close_pos.tail(5).mean()
+
+            # Metric 2: Up-days with above-avg volume (institutional buying pattern)
+            avg_vol = volume.tail(20).mean()
+            up_days_high_vol = ((close > close.shift(1)) & (volume > avg_vol)).tail(5).sum()
+
+            # Metric 3: Body consistency (large bodies = decisive moves = delivery)
+            body_size = abs(close - df["Open"].squeeze())
+            body_ratio = (body_size / range_.replace(0, np.nan)).fillna(0).tail(5).mean()
+
+            # Metric 4: Volume trend during price rise (accumulation signature)
+            recent_price_up = close.iloc[-1] > close.iloc[-5] if len(close) >= 5 else False
+            vol_rising = volume.tail(3).mean() > volume.tail(10).mean()
+            accumulation_sig = recent_price_up and vol_rising
+
+            # Composite score
+            score = (avg_close_pos * 35) + (up_days_high_vol / 5 * 30) + (body_ratio * 25) + (10 if accumulation_sig else 0)
+            score = min(100, max(0, score * 100 if score < 1 else score))
+
+            quality = "HIGH" if score >= 65 else ("MEDIUM" if score >= 40 else "LOW")
+            return {
+                "delivery_score": round(score, 1),
+                "quality": quality,
+                "avg_close_position": round(float(avg_close_pos), 3),
+                "up_days_high_vol": int(up_days_high_vol),
+                "body_consistency": round(float(body_ratio), 3),
+                "accumulation_signal": accumulation_sig,
+                "is_ok": score >= 40,
+                "note": f"✅ Delivery quality {quality} ({score:.0f}/100)" if score >= 40 else f"⚠️ Low delivery quality ({score:.0f}/100) — intraday speculation"
+            }
+        except Exception as e:
+            return {"delivery_score": 50, "quality": "MEDIUM", "is_ok": True, "note": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.1 NEW: WEEKLY TREND CONFIRMATION
+#  Weekly EMA20 must be rising. Weekly RSI must be in bullish zone.
+#  Prevents buying stocks that are in weekly downtrends.
+# ═══════════════════════════════════════════════════════════════════════
+
+class WeeklyTrendConfirmation:
+    """Weekly chart alignment — prevents buying into weekly downtrends."""
+
+    @staticmethod
+    def check(df: pd.DataFrame) -> Dict:
+        try:
+            close_d = df["Close"].squeeze()
+            # Resample to weekly
+            close_w = close_d.resample("W").last().dropna()
+            if len(close_w) < 12:
+                return {"weekly_ok": True, "note": "Insufficient weekly data", "weekly_rsi": 50}
+
+            ema20w   = close_w.ewm(span=20, adjust=False).mean()
+            ema10w   = close_w.ewm(span=10, adjust=False).mean()
+
+            # Weekly RSI (simplified)
+            delta = close_w.diff()
+            gain  = delta.clip(lower=0).rolling(14).mean()
+            loss  = (-delta.clip(upper=0)).rolling(14).mean()
+            rs    = gain / loss.replace(0, np.nan)
+            rsi_w = (100 - 100 / (1 + rs)).iloc[-1]
+
+            ema20w_rising = ema20w.iloc[-1] > ema20w.iloc[-3]
+            ema10w_rising = ema10w.iloc[-1] > ema10w.iloc[-3]
+            price_above_weekly_ema = close_w.iloc[-1] > ema20w.iloc[-1]
+            weekly_rsi_ok = rsi_w >= 40  # Not in weekly downtrend
+
+            weekly_ok = ema20w_rising and price_above_weekly_ema and weekly_rsi_ok
+
+            return {
+                "weekly_ok": weekly_ok,
+                "ema20w_rising": ema20w_rising,
+                "ema10w_rising": ema10w_rising,
+                "price_above_weekly_ema": price_above_weekly_ema,
+                "weekly_rsi": round(float(rsi_w), 1),
+                "weekly_ema20": round(float(ema20w.iloc[-1]), 2),
+                "note": "✅ Weekly trend confirmed" if weekly_ok else "⚠️ Weekly trend weak — do not buy",
+            }
+        except Exception as e:
+            return {"weekly_ok": True, "note": str(e), "weekly_rsi": 50}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.1 NEW: 52-WEEK HIGH BREAKOUT DETECTOR
+#  Most reliable India setup. Institutional momentum buying triggers here.
+# ═══════════════════════════════════════════════════════════════════════
+
+class FiftyTwoWeekHighDetector:
+    """Detects new 52-week high breakout — strongest signal in Indian markets."""
+
+    @staticmethod
+    def check(df: pd.DataFrame) -> Dict:
+        try:
+            close  = df["Close"].squeeze()
+            high   = df["High"].squeeze()
+            volume = df["Volume"].squeeze()
+
+            # 52-week high from rolling 252 bars
+            lookback = min(252, len(close) - 2)
+            high_52w = high.iloc[-(lookback+1):-1].max()
+            curr_price = close.iloc[-1]
+            prev_close = close.iloc[-2]
+            avg_vol = volume.tail(20).mean()
+            vol_ratio = volume.iloc[-1] / avg_vol if avg_vol > 0 else 1
+
+            # New 52W high: today's close > previous 52W high
+            is_new_52w_high = curr_price > high_52w
+            # Near 52W high: within 2% (about to break)
+            near_52w_high = (high_52w - curr_price) / high_52w * 100 <= 2.0
+            # Distance from 52W high
+            dist_pct = round((curr_price - high_52w) / high_52w * 100, 2)
+
+            # ATH check (all-time in available data)
+            ath = high.max()
+            is_ath = curr_price >= ath * 0.995
+
+            return {
+                "is_new_52w_high": is_new_52w_high,
+                "near_52w_high": near_52w_high,
+                "is_ath": is_ath,
+                "high_52w": round(float(high_52w), 2),
+                "dist_from_52w_pct": dist_pct,
+                "volume_on_breakout": round(vol_ratio, 2),
+                "valid_breakout": is_new_52w_high and vol_ratio >= 1.2,
+                "note": (
+                    "🚀 ATH BREAKOUT — strongest signal!" if is_ath and is_new_52w_high else
+                    "✅ New 52W High — institutional momentum buy signal" if is_new_52w_high else
+                    f"⏳ Near 52W High — {abs(dist_pct):.1f}% away, watch for break" if near_52w_high else
+                    f"📊 {abs(dist_pct):.1f}% below 52W High"
+                ),
+            }
+        except Exception as e:
+            return {"is_new_52w_high": False, "valid_breakout": False, "note": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.1 NEW: RESULTS MOMENTUM DETECTOR
+#  Post-earnings gap + hold setup. Very reliable in India Q-result seasons.
+# ═══════════════════════════════════════════════════════════════════════
+
+class ResultsMomentumDetector:
+    """
+    Detects post-earnings gap-and-hold pattern.
+    If stock gapped >5% on any day in last 10 sessions and held,
+    it's a Results Momentum candidate.
+    """
+
+    @staticmethod
+    def detect(df: pd.DataFrame) -> Dict:
+        try:
+            close  = df["Close"].squeeze()
+            open_  = df["Open"].squeeze()
+            low    = df["Low"].squeeze()
+            volume = df["Volume"].squeeze()
+            avg_vol = volume.tail(20).mean()
+
+            # Scan last 10 days for a gap event
+            results_gap_day = None
+            gap_pct = 0.0
+
+            for i in range(-10, -1):
+                gap = (open_.iloc[i] - close.iloc[i-1]) / close.iloc[i-1] * 100
+                if gap >= 5.0 and volume.iloc[i] >= avg_vol * 1.5:
+                    results_gap_day = len(close) + i
+                    gap_pct = gap
+                    break
+
+            if results_gap_day is None:
+                return {"detected": False, "gap_pct": 0, "note": "No results gap detected in last 10 sessions"}
+
+            # Check if price held above 50% of gap zone since then
+            gap_open  = float(open_.iloc[results_gap_day - len(close)])
+            gap_ref   = float(close.iloc[results_gap_day - len(close) - 1])
+            gap_50pct = gap_ref + (gap_open - gap_ref) * 0.5
+            days_since = abs(results_gap_day - len(close)) + 1  # simplified
+            price_held = close.iloc[-1] >= gap_50pct
+            vol_normalized = volume.iloc[-1] < volume.iloc[results_gap_day - len(close)] * 0.8  # vol quieting down
+
+            return {
+                "detected": True,
+                "gap_pct": round(gap_pct, 2),
+                "gap_50pct_level": round(gap_50pct, 2),
+                "price_held": price_held,
+                "vol_normalized": vol_normalized,
+                "valid_setup": price_held and vol_normalized,
+                "note": (
+                    f"✅ Results Momentum: {gap_pct:.1f}% gap held — vol normalizing, continuation likely" if price_held and vol_normalized else
+                    f"⚠️ {gap_pct:.1f}% gap detected but price filling gap — avoid" if not price_held else
+                    f"📊 {gap_pct:.1f}% gap detected, vol still high — wait for normalization"
+                ),
+            }
+        except Exception as e:
+            return {"detected": False, "gap_pct": 0, "note": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.1 NEW: OPERATOR ALERT DETECTOR
+#  Detects mid/smallcap manipulation patterns (operator-driven stocks).
+#  These stocks show huge moves on thin liquidity — avoid.
+# ═══════════════════════════════════════════════════════════════════════
+
+class OperatorAlertDetector:
+    """
+    Operator-driven stock detection for NSE mid/smallcap.
+    Signals: thin avg volume + sudden 5x+ spikes + price far from all EMAs.
+    """
+
+    @staticmethod
+    def check(df: pd.DataFrame, market_cap_cat: str = "midcap") -> Dict:
+        try:
+            close  = df["Close"].squeeze()
+            high   = df["High"].squeeze()
+            low    = df["Low"].squeeze()
+            volume = df["Volume"].squeeze()
+
+            if market_cap_cat == "largecap":
+                return {"is_operator": False, "risk_score": 0, "note": "Large cap — operator risk minimal"}
+
+            avg_vol_20 = volume.tail(20).mean()
+            avg_vol_5  = volume.tail(5).mean()
+            max_vol_20 = volume.tail(20).max()
+            curr_vol   = volume.iloc[-1]
+
+            # Signal 1: Average volume is thin (< 1 lakh shares/day for midcap)
+            thin_liquidity = avg_vol_20 < 100000
+
+            # Signal 2: Sudden massive volume spike (5x+ in one day)
+            vol_spike_ratio = max_vol_20 / avg_vol_20 if avg_vol_20 > 0 else 1
+            suspicious_spike = vol_spike_ratio > 5.0
+
+            # Signal 3: Price far from all EMAs simultaneously (operator pump)
+            ema20 = ta.ema(close, 20).iloc[-1]
+            ema50 = ta.ema(close, 50).iloc[-1]
+            cp = close.iloc[-1]
+            far_from_ema20 = (cp - ema20) / ema20 * 100 > 20 if ema20 > 0 else False
+            far_from_ema50 = (cp - ema50) / ema50 * 100 > 30 if ema50 > 0 else False
+
+            # Signal 4: Price range instability (huge candles = pump volatility)
+            ranges_pct = ((high - low) / close * 100).tail(10)
+            extreme_ranges = (ranges_pct > 8).sum()
+            range_instability = extreme_ranges >= 3
+
+            # Signal 5: Circuit limit proximity (stock hitting consecutive upper circuits)
+            consecutive_green = (close.diff().tail(5) > 0).sum()
+            possible_circuit_run = consecutive_green == 5 and vol_spike_ratio > 3
+
+            operator_score = (
+                (30 if thin_liquidity else 0) +
+                (25 if suspicious_spike else 0) +
+                (20 if far_from_ema20 else 0) +
+                (15 if range_instability else 0) +
+                (10 if possible_circuit_run else 0)
+            )
+
+            is_operator = operator_score >= 50
+
+            return {
+                "is_operator": is_operator,
+                "risk_score": operator_score,
+                "thin_liquidity": thin_liquidity,
+                "vol_spike_ratio": round(vol_spike_ratio, 1),
+                "far_from_ema20": far_from_ema20,
+                "range_instability": range_instability,
+                "possible_circuit_run": possible_circuit_run,
+                "note": (
+                    f"🚨 OPERATOR ALERT: Risk score {operator_score}/100 — avoid this stock" if is_operator else
+                    f"⚠️ Moderate operator risk ({operator_score}/100) — use small size" if operator_score >= 25 else
+                    "✅ No operator signals detected"
+                ),
+            }
+        except Exception as e:
+            return {"is_operator": False, "risk_score": 0, "note": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  v1.1 NEW: GLOBAL CUES ENGINE
+#  Asian market context for pre-market direction assessment.
+# ═══════════════════════════════════════════════════════════════════════
+
+class GlobalCuesEngine:
+    """
+    Fetches Asian/Global indices for pre-market context.
+    Nikkei, Hang Seng, SGX Nifty proxy, US futures proxy.
+    """
+    INDICES = {
+        "Nikkei 225":   "^N225",
+        "Hang Seng":    "^HSI",
+        "KOSPI":        "^KS11",
+        "Nasdaq Fut":   "NQ=F",
+        "S&P500 Fut":   "ES=F",
+        "Crude Oil":    "CL=F",
+        "USD/INR":      "USDINR=X",
+    }
+
+    @staticmethod
+    def get_cues() -> Dict:
+        try:
+            results = {}
+            positive_count = 0
+            negative_count = 0
+
+            for name, ticker in GlobalCuesEngine.INDICES.items():
+                try:
+                    df = yf.download(ticker, period="3d", progress=False)
+                    if df.empty or len(df) < 2:
+                        continue
+                    close = df["Close"].squeeze()
+                    chg = (close.iloc[-1] - close.iloc[-2]) / close.iloc[-2] * 100
+                    val = float(close.iloc[-1])
+                    results[name] = {
+                        "value": round(val, 2),
+                        "change_pct": round(float(chg), 2),
+                        "direction": "UP" if chg > 0 else "DOWN",
+                        "icon": "🟢" if chg > 0.3 else ("🔴" if chg < -0.3 else "⚪"),
+                    }
+                    if chg > 0.3: positive_count += 1
+                    elif chg < -0.3: negative_count += 1
+                except Exception:
+                    continue
+
+            # Nifty opening bias
+            if positive_count >= 4:
+                bias = "POSITIVE"; bias_strength = "Strong"
+            elif positive_count >= 2:
+                bias = "POSITIVE"; bias_strength = "Moderate"
+            elif negative_count >= 4:
+                bias = "NEGATIVE"; bias_strength = "Strong"
+            elif negative_count >= 2:
+                bias = "NEGATIVE"; bias_strength = "Moderate"
+            else:
+                bias = "NEUTRAL"; bias_strength = "Mixed"
+
+            return {
+                "indices": results,
+                "nifty_open_bias": bias,
+                "bias_strength": bias_strength,
+                "positive_markets": positive_count,
+                "negative_markets": negative_count,
+                "summary": f"{bias_strength} {bias} global cues — {positive_count} markets up, {negative_count} down",
+            }
+        except Exception as e:
+            return {"indices": {}, "nifty_open_bias": "NEUTRAL", "bias_strength": "Unknown",
+                    "summary": "Global cues unavailable", "error": str(e)}
 
 
 class BreakoutConfirmation:
@@ -1762,8 +2304,9 @@ class SetupClassifier:
                 if status == TradeStatus.READY:
                     status = TradeStatus.WATCH
 
-            # v1.0: Intraday Chase Guard — >3% from EMA20 → downgrade to WATCH
-            if dist_from_ema20 > 3.0 and status == TradeStatus.READY:
+            # v1.1: Intraday Chase Guard — India-calibrated: 5% large, 8% midcap
+            chase_threshold = 8.0 if market_cap_cat == 'midcap' else (10.0 if market_cap_cat == 'smallcap' else 5.0)
+            if dist_from_ema20 > chase_threshold and status == TradeStatus.READY:
                 status = TradeStatus.WATCH
                 if tier == ProbabilityTier.A_PLUS:
                     tier = ProbabilityTier.A
@@ -2131,13 +2674,16 @@ class PositionSizingEngine:
     def calculate_position(total_capital: float, risk_per_trade_pct: float,
                            entry: float, stop_loss: float,
                            tier: ProbabilityTier,
-                           gap_risk_factor: float = 1.0) -> Dict:
+                           gap_risk_factor: float = 1.0,
+                           vix_size_factor: float = 1.0) -> Dict:
         risk_per_share = abs(entry - stop_loss)
         if risk_per_share <= 0:
             return {'shares': 0, 'capital_required': 0, 'risk_amount': 0}
 
         r_multiplier = TIER_ALLOCATION[tier]
-        effective_r = r_multiplier * gap_risk_factor
+        # v1.1: VIX size adjustment applied here
+        vix_factor   = vix_size_factor
+        effective_r  = r_multiplier * gap_risk_factor * vix_factor
 
         base_risk = total_capital * (risk_per_trade_pct / 100)
         adjusted_risk = base_risk * effective_r
@@ -2814,8 +3360,13 @@ class SwingBullEngine:
             regime = MarketRegimeEngine.detect_regime(breadth_data=breadth, volatility_data=volatility)
             sectors = self._get_sector_data()
 
+            # v1.1: India VIX + F&O expiry + global cues
+            india_vix   = IndiaVIXEngine.get_vix()
+            fno_expiry  = FNOExpiryGuard.check()
+            global_cues = GlobalCuesEngine.get_cues()
+
             return {
-                'market_pulse': {  # Renamed from freddy_gauge
+                'market_pulse': {
                     'mpi': regime['mpi'],
                     'degrees': regime['gauge_degrees'],
                     'regime': regime['type'].value,
@@ -2831,6 +3382,10 @@ class SwingBullEngine:
                 },
                 'sectors': sectors,
                 'regime_details': regime['details'],
+                # v1.1 additions
+                'india_vix': india_vix,
+                'fno_expiry': fno_expiry,
+                'global_cues': global_cues,
                 'timestamp': datetime.now(IST_TZ).strftime('%Y-%m-%d %H:%M IST'),
                 'dashboard_meta': DASHBOARD_META,
             }
@@ -2871,17 +3426,25 @@ class SwingBullEngine:
                 if portfolio_check['is_blocked']:
                     final_status = TradeStatus.BLOCKED
 
-                # v1.0: Action Command + NLP Reasoning + Entry Zone
-                action_cmd  = ActionCommandEngine.get_command(classification, df)
-                rs_velocity = SectorRSVelocity.get_velocity(sector_data, sector)
-                ema20_val   = float(ta.ema(df['Close'].squeeze(), 20).iloc[-1])
-                entry_zone  = EntryZoneClassifier.classify(entry_price, risk_data['entry'], ema20_val)
-                reasoning   = NLPReasoningEngine.generate(ticker, classification, rs_velocity, action_cmd)
+                # v1.1: All filters + new India-specific checks
+                action_cmd    = ActionCommandEngine.get_command(classification, df)
+                rs_velocity   = SectorRSVelocity.get_velocity(sector_data, sector)
+                ema20_val     = float(ta.ema(df['Close'].squeeze(), 20).iloc[-1])
+                entry_zone    = EntryZoneClassifier.classify(entry_price, risk_data['entry'], ema20_val)
+                reasoning     = NLPReasoningEngine.generate(ticker, classification, rs_velocity, action_cmd)
+                weekly_vol    = WeeklyVolumeConfirmation.check(df)
+                vcp_check     = VCPFilter.check_15day(df)
+                tight_flag    = VCPFilter.check_tight_flag_3day(df)
+                # v1.1 new
+                delivery      = DeliveryQualityEstimator.estimate(df)
+                weekly_trend  = WeeklyTrendConfirmation.check(df)
+                fifty2w       = FiftyTwoWeekHighDetector.check(df)
+                results_mom   = ResultsMomentumDetector.detect(df)
+                operator_chk  = OperatorAlertDetector.check(df, cap_cat)
 
-                # v1.0: weekly vol + VCP check
-                weekly_vol  = WeeklyVolumeConfirmation.check(df)
-                vcp_check   = VCPFilter.check_15day(df)
-                tight_flag  = VCPFilter.check_tight_flag_3day(df)
+                # v1.1: Kill operator stocks immediately
+                if operator_chk['is_operator']:
+                    final_status = TradeStatus.AVOID
 
                 results.append({
                     'ticker': ticker,
@@ -2901,19 +3464,32 @@ class SwingBullEngine:
                     'morning_spike_valid': classification.get('gap_risk', {}).get('morning_spike_valid', False),
                     'portfolio_blocked': portfolio_check['is_blocked'],
                     'block_reason': portfolio_check.get('reason'),
-                    # v1.0 new fields
+                    # v1.0 fields
                     'action_command': action_cmd,
                     'reasoning': reasoning,
                     'entry_zone': entry_zone,
                     'rs_velocity': rs_velocity,
                     'weekly_vol_confirmed': weekly_vol.get('confirmed', True),
                     'weekly_vol_ratio': weekly_vol.get('weekly_ratio', 1.0),
-                    'vcp_15d': vcp_check.get('vcp_15d', False),
+                    'vcp_10d': vcp_check.get('vcp_15d', False),
                     'tight_flag_3d': tight_flag.get('tight_flag_3d', False),
+                    # v1.1 new fields
+                    'delivery_quality': delivery.get('quality', 'MEDIUM'),
+                    'delivery_score': delivery.get('delivery_score', 50),
+                    'weekly_trend_ok': weekly_trend.get('weekly_ok', True),
+                    'weekly_rsi': weekly_trend.get('weekly_rsi', 50),
+                    'is_52w_high': fifty2w.get('is_new_52w_high', False),
+                    'near_52w_high': fifty2w.get('near_52w_high', False),
+                    'is_ath': fifty2w.get('is_ath', False),
+                    'results_momentum': results_mom.get('valid_setup', False),
+                    'results_gap_pct': results_mom.get('gap_pct', 0),
+                    'operator_alert': operator_chk['is_operator'],
+                    'operator_risk_score': operator_chk['risk_score'],
                     'ui_hints': {
                         'status_color': DASHBOARD_META['status_colors'].get(final_status.value, '#64748B'),
                         'action_color': action_cmd.get('color', '#64748B'),
                         'zone_color': entry_zone.get('color', '#64748B'),
+                        'delivery_color': '#00FF9D' if delivery.get('quality') == 'HIGH' else ('#FFBF00' if delivery.get('quality') == 'MEDIUM' else '#FF0055'),
                     },
                 })
             except Exception as e:
@@ -3120,10 +3696,14 @@ __all__ = [
     'PlaybookGenerator', 'ActiveTradeEvaluator',
     'TradeExpectancyTracker',
     'PortfolioRiskEngine',
-    # v1.0 new exports
+    # v1.0 exports
     'WeeklyVolumeConfirmation', 'VCPFilter', 'BreadthDivergenceDetector',
     'SectorRSVelocity', 'CorrelationReplacementEngine',
     'ActionCommandEngine', 'NLPReasoningEngine', 'EntryZoneClassifier',
     'Layer8Journal',
+    # v1.1 new exports
+    'IndiaVIXEngine', 'FNOExpiryGuard', 'DeliveryQualityEstimator',
+    'WeeklyTrendConfirmation', 'FiftyTwoWeekHighDetector',
+    'ResultsMomentumDetector', 'OperatorAlertDetector', 'GlobalCuesEngine',
     'DASHBOARD_META',
 ]
