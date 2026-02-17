@@ -46,12 +46,45 @@ from flask_cors import CORS
 #  Python types so Flask's jsonify() can handle them without crashing.
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _safe_convert(obj):
+    """Recursively convert all non-JSON-safe types in dicts/lists."""
+    if isinstance(obj, dict):
+        return {k: _safe_convert(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_safe_convert(i) for i in obj]
+    if isinstance(obj, bool) or isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, (np.int8, np.int16, np.int32, np.int64,
+                        np.uint8, np.uint16, np.uint32, np.uint64)):
+        return int(obj)
+    if isinstance(obj, (np.float16, np.float32, np.float64)):
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return [_safe_convert(i) for i in obj.tolist()]
+    try:
+        import pandas as pd
+        if isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+    except Exception:
+        pass
+    return obj
+
+
+def safe_jsonify(data):
+    """Drop-in replacement for jsonify() that handles all numpy/bool types."""
+    return app.response_class(
+        response=json.dumps(_safe_convert(data)),
+        status=200,
+        mimetype='application/json'
+    )
+
+
 class NumpyEncoder(json.JSONEncoder):
+    """Kept for backward compat — safe_jsonify is the real fix."""
     def default(self, obj):
-        # Native Python bool FIRST (bool is subclass of int — must check before int)
-        if type(obj) is bool:
-            return bool(obj)
-        if isinstance(obj, np.bool_):
+        if isinstance(obj, bool) or isinstance(obj, np.bool_):
             return bool(obj)
         if isinstance(obj, (np.int8, np.int16, np.int32, np.int64,
                             np.uint8, np.uint16, np.uint32, np.uint64)):
@@ -62,13 +95,6 @@ class NumpyEncoder(json.JSONEncoder):
             return float(obj)
         if isinstance(obj, np.ndarray):
             return obj.tolist()
-        # Pandas Timestamp
-        try:
-            import pandas as pd
-            if isinstance(obj, pd.Timestamp):
-                return obj.isoformat()
-        except ImportError:
-            pass
         return super().default(obj)
 
 # ── Import the trading engine ──────────────────────────────────────────────
@@ -123,22 +149,16 @@ engine = SwingBullEngine(
 logger.info(f"SwingBullEngine v4 initialised — capital ₹{TOTAL_CAPITAL:,.0f}, risk {RISK_PER_TRADE}%/trade")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  KEEP-ALIVE — Prevents Render free tier from sleeping
-# ═══════════════════════════════════════════════════════════════════════════
-
+# ── Keep-alive: prevents Render free tier from sleeping ──────────────────────
 def keep_alive():
     import requests, time
     time.sleep(60)
     self_url = os.environ.get("RENDER_EXTERNAL_URL", "https://swing-trading-indian-nse.onrender.com")
-    ping_url = f"{self_url}/api/market-regime"
-    logger.info(f"Keep-alive thread started — pinging {ping_url} every 10 min")
     while True:
         try:
-            requests.get(ping_url, timeout=30)
-            logger.debug("Keep-alive ping OK")
-        except Exception as e:
-            logger.warning(f"Keep-alive ping failed: {e}")
+            requests.get(f"{self_url}/api/market-regime", timeout=30)
+        except Exception:
+            pass
         time.sleep(600)
 
 threading.Thread(target=keep_alive, daemon=True).start()
@@ -211,7 +231,7 @@ TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}
 
 def _err(msg: str, code: int = 500):
     logger.error(msg)
-    return jsonify({"error": msg, "dashboard_meta": DASHBOARD_META}), code
+    return safe_jsonify({"error": msg, "dashboard_meta": DASHBOARD_META}), code
 
 
 def _resolve_tickers(body: dict) -> list:
@@ -229,7 +249,7 @@ def _resolve_tickers(body: dict) -> list:
 # ── Health check ────────────────────────────────────────────────────────────
 @app.route("/", methods=["GET", "HEAD"])
 def root():
-    return jsonify({
+    return safe_jsonify({
         "status": "live",
         "engine": "SwingBullEngine v4",
         "name": DASHBOARD_META["branding"]["name"],
@@ -257,7 +277,7 @@ def market_regime():
     """
     try:
         data = engine.get_market_regime_public()
-        return jsonify(data)
+        return safe_jsonify(data)
     except Exception as e:
         logger.exception("market-regime error")
         return _err(str(e))
@@ -275,7 +295,7 @@ def scan():
     No authentication required.
     """
     if request.method == "OPTIONS":
-        return jsonify({}), 200
+        return safe_jsonify({}), 200
 
     try:
         body    = request.get_json(silent=True) or {}
@@ -287,7 +307,7 @@ def scan():
             market_cap_map= TICKER_MARKET_CAP,
         )
 
-        return jsonify({
+        return safe_jsonify({
             "results": results,
             "count":   len(results),
             "scanned": len(tickers),
@@ -317,7 +337,7 @@ def analyse():
     Returns full 7-layer analysis with portfolio constraints.
     """
     if request.method == "OPTIONS":
-        return jsonify({}), 200
+        return safe_jsonify({}), 200
 
     try:
         body       = request.get_json(silent=True) or {}
@@ -341,7 +361,7 @@ def analyse():
             auth_token      = auth_token,
         )
 
-        return jsonify(result)
+        return safe_jsonify(result)
 
     except PermissionError as e:
         return _err(str(e), 401)
@@ -356,7 +376,7 @@ def sectors():
     """Returns sector RS rankings and concentration index."""
     try:
         data = SectorLeadershipEngine.analyze_sectors()
-        return jsonify({
+        return safe_jsonify({
             "sectors": data,
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "dashboard_meta": DASHBOARD_META,
@@ -383,7 +403,7 @@ def portfolio_validate():
     Returns: {allowed, block_reason, violations, warnings, operating_mode}
     """
     if request.method == "OPTIONS":
-        return jsonify({}), 200
+        return safe_jsonify({}), 200
 
     try:
         body = request.get_json(silent=True) or {}
@@ -409,7 +429,7 @@ def portfolio_validate():
 
         result["operating_mode"] = op_mode
         result["dashboard_meta"] = DASHBOARD_META
-        return jsonify(result)
+        return safe_jsonify(result)
 
     except Exception as e:
         logger.exception("portfolio/validate error")
@@ -431,7 +451,7 @@ def update_positions():
     Updates the engine's active positions for portfolio constraint checks.
     """
     if request.method == "OPTIONS":
-        return jsonify({}), 200
+        return safe_jsonify({}), 200
 
     try:
         body = request.get_json(silent=True) or {}
@@ -439,7 +459,7 @@ def update_positions():
 
         engine.set_active_positions(positions)
 
-        return jsonify({
+        return safe_jsonify({
             "message": "Positions updated",
             "count": len(positions),
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -464,7 +484,7 @@ def record_trade():
     Records trade to expectancy tracker (requires auth).
     """
     if request.method == "OPTIONS":
-        return jsonify({}), 200
+        return safe_jsonify({}), 200
 
     try:
         body       = request.get_json(silent=True) or {}
@@ -482,7 +502,7 @@ def record_trade():
             won        = won,
             auth_token = auth_token,
         )
-        return jsonify({
+        return safe_jsonify({
             "recorded": True,
             "setup_type": setup_type,
             "r": r_result,
@@ -508,7 +528,7 @@ def performance():
     try:
         auth_token = request.args.get("auth_token", "")
         stats = engine.get_performance_stats(auth_token=auth_token)
-        return jsonify({
+        return safe_jsonify({
             "stats": stats,
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "dashboard_meta": DASHBOARD_META,
@@ -535,7 +555,7 @@ def active_trade():
       }
     """
     if request.method == "OPTIONS":
-        return jsonify({}), 200
+        return safe_jsonify({}), 200
 
     try:
         body       = request.get_json(silent=True) or {}
@@ -569,7 +589,7 @@ def active_trade():
             entry_date  = entry_date,
         )
         result["dashboard_meta"] = DASHBOARD_META
-        return jsonify(result)
+        return safe_jsonify(result)
 
     except Exception as e:
         logger.exception("active-trade error")
@@ -584,7 +604,7 @@ def login():
     Returns: { "token": "xxx" }  — store in frontend sessionStorage.
     """
     if request.method == "OPTIONS":
-        return jsonify({}), 200
+        return safe_jsonify({}), 200
 
     try:
         body     = request.get_json(silent=True) or {}
@@ -594,12 +614,12 @@ def login():
 
         token = engine.login(username, password, ip)
         if token:
-            return jsonify({
+            return safe_jsonify({
                 "token": token,
                 "message": "Login successful",
                 "dashboard_meta": DASHBOARD_META,
             })
-        return jsonify({"error": "Invalid credentials or IP blocked"}), 401
+        return safe_jsonify({"error": "Invalid credentials or IP blocked"}), 401
 
     except Exception as e:
         logger.exception("login error")
@@ -611,13 +631,13 @@ def login():
 def logout():
     """Body: { "token": "xxx" }"""
     if request.method == "OPTIONS":
-        return jsonify({}), 200
+        return safe_jsonify({}), 200
 
     try:
         body  = request.get_json(silent=True) or {}
         token = body.get("token", "")
         engine.logout(token)
-        return jsonify({"message": "Logged out"})
+        return safe_jsonify({"message": "Logged out"})
     except Exception as e:
         return _err(str(e))
 
@@ -628,7 +648,7 @@ def logout():
 
 @app.errorhandler(404)
 def not_found(e):
-    return jsonify({
+    return safe_jsonify({
         "error": "Endpoint not found",
         "available": [
             "GET  /",
@@ -651,13 +671,13 @@ def not_found(e):
 
 @app.errorhandler(405)
 def method_not_allowed(e):
-    return jsonify({"error": "Method not allowed"}), 405
+    return safe_jsonify({"error": "Method not allowed"}), 405
 
 
 @app.errorhandler(500)
 def internal_error(e):
     logger.exception("Unhandled 500")
-    return jsonify({
+    return safe_jsonify({
         "error": "Internal server error",
         "dashboard_meta": DASHBOARD_META,
     }), 500
