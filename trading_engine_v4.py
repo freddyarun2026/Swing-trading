@@ -2,7 +2,7 @@
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║          SWING BULL TRADER™ v1.1 — Trading Engine                           ║
 ║          Architected by Freddy — Personal Use Only                          ║
-║          Indian Market Calibrated • NSE Realistic Thresholds                            ║
+║          Indian Market Calibrated • 3mo Data • Memory Optimized                            ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 LAYERED ARCHITECTURE:
@@ -229,7 +229,7 @@ class SetupType(Enum):
     PULLBACK           = "Pullback"
     MOMENTUM           = "Momentum"
     POWER_PLAY         = "Power Play"
-    FIFTY_TWO_WEEK     = "52W High Breakout"  # v1.1: most reliable India breakout
+    FIFTY_TWO_WEEK     = "12W High Breakout"  # v1.1: most reliable India breakout
     RESULTS_MOMENTUM   = "Results Momentum"   # v1.1: post-earnings continuation
     UNKNOWN            = "Unknown"
 
@@ -419,9 +419,9 @@ SETUP_CONFIGS = {
 
     # ── v1.1 NEW: 52-WEEK HIGH BREAKOUT ──────────────────────────────
     SetupType.FIFTY_TWO_WEEK: SetupConfig(
-        name="52W High Breakout",
+        name="12W High Breakout",
         mandatory_filters={
-            'at_52w_high': True,               # Price breaking 52-week high
+            'at_12w_high': True,               # Price breaking 12-week high
             'min_volume_ratio': 1.3,           # Lower vol needed — institutional buying triggers here
             'sector_rs_positive': True,
             'liquidity_ok': True,
@@ -564,7 +564,8 @@ class MarketBreadthEngine:
 
         for ticker in tickers:
             try:
-                df = yf.download(ticker, period="6mo", progress=False)
+                df = yf.download(ticker, period="3mo", progress=False)
+                import time; time.sleep(0.5)  # v1.1: rate limit
                 if df.empty or len(df) < 50:
                     continue
                 close = df['Close'].squeeze()
@@ -598,7 +599,9 @@ class MarketBreadthEngine:
     def _calc_breadth_slope() -> float:
         try:
             n50 = yf.download("^NSEI", period="3mo", progress=False)
+            import time; time.sleep(0.5)  # v1.1: rate limit
             n500 = yf.download("^CRSLDX", period="3mo", progress=False)
+            import time; time.sleep(0.5)  # v1.1: rate limit
             if n50.empty or n500.empty or len(n50) < 10:
                 return 0.0
             c50 = n50['Close'].squeeze()
@@ -621,6 +624,7 @@ class MarketBreadthEngine:
     def _estimate_from_index() -> Dict:
         try:
             df = yf.download("^NSEI", period="3mo", progress=False)
+            import time; time.sleep(0.5)  # v1.1: rate limit
             if df.empty:
                 return {'pct_above_50ema': 50, 'advance_decline_ratio': 1.0,
                         'pct_20d_high': 0.05, 'pct_20d_low': 0.05}
@@ -646,7 +650,8 @@ class VolatilityRegimeEngine:
     @staticmethod
     def detect_state(ticker: str = "^NSEI") -> Dict:
         try:
-            df = yf.download(ticker, period="6mo", progress=False)
+            df = yf.download(ticker, period="3mo", progress=False)
+            import time; time.sleep(0.5)  # v1.1: rate limit
             if df.empty:
                 return {'state': VolatilityState.COMPRESSION, 'atr_ratio': 1.0,
                         'india_vix': 15, 'details': {}}
@@ -731,7 +736,7 @@ class MarketRegimeEngine:
 
             ema20 = ta.ema(close, 20)
             ema50 = ta.ema(close, 50)
-            ema200 = ta.ema(close, 200)
+            ema100 = ta.ema(close, 100)
             rsi = ta.rsi(close, 14)
             macd = ta.macd(close)
 
@@ -743,10 +748,10 @@ class MarketRegimeEngine:
             trend_score = 0
             if curr_price > ema20.iloc[-1]: trend_score += 10
             if curr_price > ema50.iloc[-1]: trend_score += 10
-            if curr_price > ema200.iloc[-1]: trend_score += 10
+            if curr_price > ema100.iloc[-1]: trend_score += 10
             score += trend_score
             details['trend_score'] = trend_score
-            details['price_vs_ema200'] = round(((curr_price - ema200.iloc[-1]) / ema200.iloc[-1]) * 100, 2)
+            details['price_vs_ema100'] = round(((curr_price - ema100.iloc[-1]) / ema100.iloc[-1]) * 100, 2)
 
             # MOMENTUM (0-25)
             momentum_5d = ((curr_price - close.iloc[-5]) / close.iloc[-5]) * 100
@@ -894,7 +899,8 @@ class SectorLeadershipEngine:
     def analyze_sectors(benchmark: str = "^NSEI") -> Dict:
         results = {}
         try:
-            bench_df = yf.download(benchmark, period="6mo", progress=False)
+            bench_df = yf.download(benchmark, period="3mo", progress=False)
+            import time; time.sleep(0.5)  # v1.1: rate limit
             if bench_df.empty:
                 return {}
             bench_close = bench_df['Close'].squeeze()
@@ -903,7 +909,8 @@ class SectorLeadershipEngine:
 
         for sector_name, sector_ticker in SECTOR_INDEX_MAP.items():
             try:
-                df = yf.download(sector_ticker, period="6mo", progress=False)
+                df = yf.download(sector_ticker, period="3mo", progress=False)
+                import time; time.sleep(0.5)  # v1.1: rate limit
                 if df.empty or len(df) < 60:
                     continue
                 close = df['Close'].squeeze()
@@ -999,7 +1006,8 @@ class MultiTimeframeRS:
     @staticmethod
     def calculate(stock_close: pd.Series, benchmark_ticker: str = "^NSEI") -> Dict:
         try:
-            bench_df = yf.download(benchmark_ticker, period="6mo", progress=False)
+            bench_df = yf.download(benchmark_ticker, period="3mo", progress=False)
+            import time; time.sleep(0.5)  # v1.1: rate limit
             if bench_df.empty:
                 return {'rs_5d': 0, 'rs_20d': 0, 'rs_60d': 0, 'composite': 0}
             bench_close = bench_df['Close'].squeeze()
@@ -1768,7 +1776,7 @@ class WeeklyTrendConfirmation:
 # ═══════════════════════════════════════════════════════════════════════
 
 class FiftyTwoWeekHighDetector:
-    """Detects new 52-week high breakout — strongest signal in Indian markets."""
+    """Detects new 12-week high breakout — strongest signal in Indian markets."""
 
     @staticmethod
     def check(df: pd.DataFrame) -> Dict:
@@ -1777,42 +1785,42 @@ class FiftyTwoWeekHighDetector:
             high   = df["High"].squeeze()
             volume = df["Volume"].squeeze()
 
-            # 52-week high from rolling 252 bars
-            lookback = min(252, len(close) - 2)
-            high_52w = high.iloc[-(lookback+1):-1].max()
+            # 12-week high from rolling 60 bars
+            lookback = min(60, len(close) - 2)
+            high_12w = high.iloc[-(lookback+1):-1].max()
             curr_price = close.iloc[-1]
             prev_close = close.iloc[-2]
             avg_vol = volume.tail(20).mean()
             vol_ratio = volume.iloc[-1] / avg_vol if avg_vol > 0 else 1
 
-            # New 52W high: today's close > previous 52W high
-            is_new_52w_high = curr_price > high_52w
-            # Near 52W high: within 2% (about to break)
-            near_52w_high = (high_52w - curr_price) / high_52w * 100 <= 2.0
-            # Distance from 52W high
-            dist_pct = round((curr_price - high_52w) / high_52w * 100, 2)
+            # New 12W high: today's close > previous 12W high
+            is_new_12w_high = curr_price > high_12w
+            # Near 12W high: within 2% (about to break)
+            near_12w_high = (high_12w - curr_price) / high_12w * 100 <= 2.0
+            # Distance from 12W high
+            dist_pct = round((curr_price - high_12w) / high_12w * 100, 2)
 
             # ATH check (all-time in available data)
             ath = high.max()
             is_ath = curr_price >= ath * 0.995
 
             return {
-                "is_new_52w_high": is_new_52w_high,
-                "near_52w_high": near_52w_high,
+                "is_new_12w_high": is_new_12w_high,
+                "near_12w_high": near_12w_high,
                 "is_ath": is_ath,
-                "high_52w": round(float(high_52w), 2),
-                "dist_from_52w_pct": dist_pct,
+                "high_12w": round(float(high_12w), 2),
+                "dist_from_12w_pct": dist_pct,
                 "volume_on_breakout": round(vol_ratio, 2),
-                "valid_breakout": is_new_52w_high and vol_ratio >= 1.2,
+                "valid_breakout": is_new_12w_high and vol_ratio >= 1.2,
                 "note": (
-                    "🚀 ATH BREAKOUT — strongest signal!" if is_ath and is_new_52w_high else
-                    "✅ New 52W High — institutional momentum buy signal" if is_new_52w_high else
-                    f"⏳ Near 52W High — {abs(dist_pct):.1f}% away, watch for break" if near_52w_high else
-                    f"📊 {abs(dist_pct):.1f}% below 52W High"
+                    "🚀 ATH BREAKOUT — strongest signal!" if is_ath and is_new_12w_high else
+                    "✅ New 12W High — institutional momentum buy signal" if is_new_12w_high else
+                    f"⏳ Near 12W High — {abs(dist_pct):.1f}% away, watch for break" if near_12w_high else
+                    f"📊 {abs(dist_pct):.1f}% below 12W High"
                 ),
             }
         except Exception as e:
-            return {"is_new_52w_high": False, "valid_breakout": False, "note": str(e)}
+            return {"is_new_12w_high": False, "valid_breakout": False, "note": str(e)}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2343,12 +2351,12 @@ class SetupClassifier:
 
             # TREND CONTEXT TAG
             try:
-                ema200 = ta.ema(close, 200)
-                dist_from_ema200 = ((curr_price - ema200.iloc[-1]) / ema200.iloc[-1]) * 100
+                ema100 = ta.ema(close, 100)
+                dist_from_ema100 = ((curr_price - ema100.iloc[-1]) / ema100.iloc[-1]) * 100
                 rs_composite_val = rs_data.get('composite', 0)
-                if dist_from_ema200 < 5 and rs_composite_val < 3:
+                if dist_from_ema100 < 5 and rs_composite_val < 3:
                     trend_context = "Early_Trend"
-                elif dist_from_ema200 < 15 and rs_composite_val < 8:
+                elif dist_from_ema100 < 15 and rs_composite_val < 8:
                     trend_context = "Mid_Trend"
                 else:
                     trend_context = "Late_Trend"
@@ -3016,6 +3024,7 @@ class ActiveTradeEvaluator:
                        entry_date: datetime) -> Dict:
         try:
             df = yf.download(ticker, period="3mo", progress=False)
+            import time; time.sleep(0.5)  # v1.1: rate limit
             if df.empty:
                 return {'error': 'Unable to fetch data'}
 
@@ -3401,7 +3410,8 @@ class SwingBullEngine:
         results = []
         for ticker in tickers:
             try:
-                df = yf.download(ticker, period="6mo", progress=False)
+                df = yf.download(ticker, period="3mo", progress=False)
+                import time; time.sleep(0.5)  # v1.1: rate limit
                 if df.empty:
                     continue
                 sector = (sector_map or {}).get(ticker, "")
@@ -3478,8 +3488,8 @@ class SwingBullEngine:
                     'delivery_score': delivery.get('delivery_score', 50),
                     'weekly_trend_ok': weekly_trend.get('weekly_ok', True),
                     'weekly_rsi': weekly_trend.get('weekly_rsi', 50),
-                    'is_52w_high': fifty2w.get('is_new_52w_high', False),
-                    'near_52w_high': fifty2w.get('near_52w_high', False),
+                    'is_12w_high': fifty2w.get('is_new_12w_high', False),
+                    'near_12w_high': fifty2w.get('near_12w_high', False),
                     'is_ath': fifty2w.get('is_ath', False),
                     'results_momentum': results_mom.get('valid_setup', False),
                     'results_gap_pct': results_mom.get('gap_pct', 0),
@@ -3518,7 +3528,8 @@ class SwingBullEngine:
         sector_data = self._get_sector_data()
 
         # Fetch stock data
-        df = yf.download(ticker, period="6mo", progress=False)
+        df = yf.download(ticker, period="3mo", progress=False)
+        import time; time.sleep(0.5)  # v1.1: rate limit
         if df.empty:
             return {'error': f'No data for {ticker}'}
 
