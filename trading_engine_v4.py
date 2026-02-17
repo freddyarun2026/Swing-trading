@@ -64,6 +64,28 @@ import pytz
 
 IST_TZ = pytz.timezone('Asia/Kolkata')
 
+# ── Benchmark data cache (prevents Yahoo rate limiting) ──────────────────────
+_BENCHMARK_CACHE = {}
+_CACHE_TIMESTAMP = {}
+
+def _get_benchmark_data(ticker: str, period: str = "3mo"):
+    """Download benchmark with caching to avoid rate limits."""
+    import time
+    cache_key = f"{ticker}_{period}"
+    now = time.time()
+    
+    # Cache valid for 15 minutes
+    if cache_key in _BENCHMARK_CACHE and (now - _CACHE_TIMESTAMP.get(cache_key, 0)) < 900:
+        return _BENCHMARK_CACHE[cache_key]
+    
+    # Download fresh data
+    df = yf.download(ticker, period=period, progress=False)
+    time.sleep(0.3)  # Rate limit delay
+    
+    _BENCHMARK_CACHE[cache_key] = df
+    _CACHE_TIMESTAMP[cache_key] = now
+    return df
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
 logger = logging.getLogger("swingbull.engine")
 
@@ -598,8 +620,7 @@ class MarketBreadthEngine:
     @staticmethod
     def _calc_breadth_slope() -> float:
         try:
-            n50 = yf.download("^NSEI", period="3mo", progress=False)
-            import time; time.sleep(0.5)  # v1.1: rate limit
+            n50 = _get_benchmark_data("^NSEI", "3mo")
             n500 = yf.download("^CRSLDX", period="3mo", progress=False)
             import time; time.sleep(0.5)  # v1.1: rate limit
             if n50.empty or n500.empty or len(n50) < 10:
@@ -623,8 +644,7 @@ class MarketBreadthEngine:
     @staticmethod
     def _estimate_from_index() -> Dict:
         try:
-            df = yf.download("^NSEI", period="3mo", progress=False)
-            import time; time.sleep(0.5)  # v1.1: rate limit
+            df = _get_benchmark_data("^NSEI", "3mo")
             if df.empty:
                 return {'pct_above_50ema': 50, 'advance_decline_ratio': 1.0,
                         'pct_20d_high': 0.05, 'pct_20d_low': 0.05}
@@ -899,8 +919,7 @@ class SectorLeadershipEngine:
     def analyze_sectors(benchmark: str = "^NSEI") -> Dict:
         results = {}
         try:
-            bench_df = yf.download(benchmark, period="3mo", progress=False)
-            import time; time.sleep(0.5)  # v1.1: rate limit
+            bench_df = _get_benchmark_data(benchmark, "3mo")
             if bench_df.empty:
                 return {}
             bench_close = bench_df['Close'].squeeze()
@@ -1006,8 +1025,7 @@ class MultiTimeframeRS:
     @staticmethod
     def calculate(stock_close: pd.Series, benchmark_ticker: str = "^NSEI") -> Dict:
         try:
-            bench_df = yf.download(benchmark_ticker, period="3mo", progress=False)
-            import time; time.sleep(0.5)  # v1.1: rate limit
+            bench_df = _get_benchmark_data(benchmark_ticker, "3mo")
             if bench_df.empty:
                 return {'rs_5d': 0, 'rs_20d': 0, 'rs_60d': 0, 'composite': 0}
             bench_close = bench_df['Close'].squeeze()
