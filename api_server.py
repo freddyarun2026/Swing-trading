@@ -227,6 +227,107 @@ TICKER_SECTOR = {
 # Map ticker → market-cap category
 TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}
 
+# ── Nifty Midcap 150 universe ─────────────────────────────────────────────
+NIFTY_MIDCAP150_TICKERS = [
+    "ABCAPITAL.NS","ABFRL.NS","AIAENG.NS","ALKEM.NS","AMBUJACEM.NS",
+    "APLAPOLLO.NS","ASTRAL.NS","ATUL.NS","AUBANK.NS","BALKRISIND.NS",
+    "BANKINDIA.NS","BATAINDIA.NS","BERGEPAINT.NS","BHARATFORG.NS","BHEL.NS",
+    "BIOCON.NS","BOSCHLTD.NS","CANBK.NS","CANFINHOME.NS","CASTROLIND.NS",
+    "CEATLTD.NS","CENTRALBK.NS","CESC.NS","CHOLAFIN.NS","COFORGE.NS",
+    "COLPAL.NS","CONCOR.NS","COROMANDEL.NS","CROMPTON.NS","CUMMINSIND.NS",
+    "DABUR.NS","DALBHARAT.NS","DEEPAKNTR.NS","DELTACORP.NS","DIXON.NS",
+    "ESCORTS.NS","EXIDEIND.NS","FEDERALBNK.NS","GAIL.NS","GMRINFRA.NS",
+    "GODREJCP.NS","GODREJPROP.NS","GRANULES.NS","GSPL.NS","HAVELLS.NS",
+    "HFCL.NS","HONAUT.NS","IDFCFIRSTB.NS","IGL.NS","INDUSTOWER.NS",
+    "INOXWIND.NS","IOC.NS","IPCALAB.NS","IRCTC.NS","JKCEMENT.NS",
+    "JSL.NS","JUBLFOOD.NS","KAJARIACER.NS","KEC.NS","KPITTECH.NS",
+    "L&TFH.NS","LALPATHLAB.NS","LICHSGFIN.NS","LUPIN.NS","MARICO.NS",
+    "MCDOWELL-N.NS","MCX.NS","MFSL.NS","MOTHERSON.NS","MPHASIS.NS",
+    "MRF.NS","MUTHOOTFIN.NS","NAUKRI.NS","NBCC.NS","NCC.NS",
+    "NMDC.NS","OBEROIRLTY.NS","OFSS.NS","OIL.NS","PAGEIND.NS",
+    "PERSISTENT.NS","PETRONET.NS","PFIZER.NS","PIDILITIND.NS","PIIND.NS",
+    "PNB.NS","POLYCAB.NS","PRINCEPIPE.NS","RAMCOCEM.NS","RBLBANK.NS",
+    "RECLTD.NS","SAIL.NS","SCHAEFFLER.NS","SFL.NS","SIEMENS.NS",
+    "SKFINDIA.NS","SRF.NS","STARHEALTH.NS","SUMICHEM.NS","SUNTV.NS",
+    "SUPREMEIND.NS","SYMPHONY.NS","TATACOMM.NS","TATACHEM.NS","TATAELXSI.NS",
+    "TATAPOWER.NS","TIINDIA.NS","TORNTPHARM.NS","TORNTPOWER.NS","TVSMOTOR.NS",
+    "UBL.NS","UJJIVANSFB.NS","UNIONBANK.NS","UPL.NS","VOLTAS.NS",
+    "WHIRLPOOL.NS","YESBANK.NS","ZEEL.NS","ZYDUSLIFE.NS",
+    "AAVAS.NS","AFFLE.NS","ANGELONE.NS","APTUS.NS","ARVINDFASN.NS",
+    "ASAHIINDIA.NS","BSOFT.NS","CARBORUNIV.NS","CDSL.NS","CLEAN.NS",
+    "DATAMATICS.NS","DELHIVERY.NS","DOMS.NS","EPIGRAL.NS","FINEORG.NS",
+    "FINPIPE.NS","GLAND.NS","GRINDWELL.NS","HOMEFIRST.NS","IONEXCHANG.NS",
+    "ISEC.NS","ITI.NS","JYOTHYLAB.NS","KALYANKJIL.NS","KFINTECH.NS",
+    "KIMS.NS","LATENTVIEW.NS","MAPMYINDIA.NS","METROPOLIS.NS","NAZARA.NS",
+    "NETWORK18.NS","NLCINDIA.NS","NYKAA.NS","PAYTM.NS",
+]
+
+TICKER_SECTOR_MIDCAP = {
+    "BANKINDIA.NS":"banking","CANBK.NS":"banking","CANFINHOME.NS":"banking",
+    "CENTRALBK.NS":"banking","CHOLAFIN.NS":"banking","FEDERALBNK.NS":"banking",
+    "IDFCFIRSTB.NS":"banking","L&TFH.NS":"banking","LICHSGFIN.NS":"banking",
+    "MUTHOOTFIN.NS":"banking","PNB.NS":"banking","RBLBANK.NS":"banking",
+    "RECLTD.NS":"banking","UJJIVANSFB.NS":"banking","UNIONBANK.NS":"banking",
+    "ABCAPITAL.NS":"banking","ANGELONE.NS":"banking","ISEC.NS":"banking",
+    "KFINTECH.NS":"banking","STARHEALTH.NS":"banking","MFSL.NS":"banking",
+
+    "COFORGE.NS":"it","KPITTECH.NS":"it","MPHASIS.NS":"it",
+    "OFSS.NS":"it","PERSISTENT.NS":"it","TATAELXSI.NS":"it",
+    "BSOFT.NS":"it","LATENTVIEW.NS":"it","MAPMYINDIA.NS":"it",
+
+    "ALKEM.NS":"pharma","BIOCON.NS":"pharma","GRANULES.NS":"pharma",
+    "IPCALAB.NS":"pharma","LALPATHLAB.NS":"pharma","LUPIN.NS":"pharma",
+    "PFIZER.NS":"pharma","TORNTPHARM.NS":"pharma","ZYDUSLIFE.NS":"pharma",
+    "GLAND.NS":"pharma","METROPOLIS.NS":"pharma",
+
+    "BALKRISIND.NS":"auto","BHARATFORG.NS":"auto","CEATLTD.NS":"auto",
+    "ESCORTS.NS":"auto","MOTHERSON.NS":"auto","MRF.NS":"auto",
+    "TVSMOTOR.NS":"auto","TIINDIA.NS":"auto","SCHAEFFLER.NS":"auto",
+
+    "AIAENG.NS":"metal","JSPL.NS":"metal","NMDC.NS":"metal",
+    "SAIL.NS":"metal","JSL.NS":"metal",
+
+    "GAIL.NS":"energy","IOC.NS":"energy","OIL.NS":"energy",
+    "TATAPOWER.NS":"energy","CESC.NS":"energy","GSPL.NS":"energy",
+    "IGL.NS":"energy","PETRONET.NS":"energy","INOXWIND.NS":"energy",
+
+    "GMRINFRA.NS":"infra","KEC.NS":"infra","NBCC.NS":"infra",
+    "NCC.NS":"infra","CONCOR.NS":"infra","INDUSTOWER.NS":"infra",
+    "HFCL.NS":"infra","BHEL.NS":"infra","ITI.NS":"infra","NLCINDIA.NS":"infra",
+
+    "ABFRL.NS":"fmcg","BATAINDIA.NS":"fmcg","COLPAL.NS":"fmcg",
+    "CROMPTON.NS":"fmcg","DABUR.NS":"fmcg","GODREJCP.NS":"fmcg",
+    "HAVELLS.NS":"fmcg","JUBLFOOD.NS":"fmcg","MARICO.NS":"fmcg",
+    "MCDOWELL-N.NS":"fmcg","PAGEIND.NS":"fmcg","SYMPHONY.NS":"fmcg",
+    "UBL.NS":"fmcg","WHIRLPOOL.NS":"fmcg","JYOTHYLAB.NS":"fmcg",
+    "KALYANKJIL.NS":"fmcg","NYKAA.NS":"fmcg",
+
+    "AMBUJACEM.NS":"infra","APLAPOLLO.NS":"metal","ASTRAL.NS":"infra",
+    "BERGEPAINT.NS":"fmcg","BOSCHLTD.NS":"auto","CASTROLIND.NS":"energy",
+    "COROMANDEL.NS":"fmcg","CUMMINSIND.NS":"infra","DALBHARAT.NS":"infra",
+    "DEEPAKNTR.NS":"pharma","DIXON.NS":"it","EXIDEIND.NS":"auto",
+    "GODREJPROP.NS":"infra","KAJARIACER.NS":"infra","MCX.NS":"banking",
+    "OBEROIRLTY.NS":"infra","PIDILITIND.NS":"fmcg","PIIND.NS":"pharma",
+    "POLYCAB.NS":"infra","RAMCOCEM.NS":"infra","SIEMENS.NS":"infra",
+    "SKFINDIA.NS":"auto","SRF.NS":"pharma","SUNTV.NS":"fmcg",
+    "SUPREMEIND.NS":"infra","TATACOMM.NS":"it","TATACHEM.NS":"pharma",
+    "TORNTPOWER.NS":"energy","ATUL.NS":"pharma","AUBANK.NS":"banking",
+    "DELTACORP.NS":"fmcg","SUMICHEM.NS":"pharma","VOLTAS.NS":"fmcg",
+    "ZEEL.NS":"fmcg","DELHIVERY.NS":"infra","NAZARA.NS":"it",
+    "NETWORK18.NS":"fmcg","PAYTM.NS":"it","CDSL.NS":"banking",
+    "CLEAN.NS":"energy","FINEORG.NS":"pharma","GRINDWELL.NS":"metal",
+    "CARBORUNIV.NS":"metal","DOMS.NS":"fmcg","EPIGRAL.NS":"pharma",
+    "FINPIPE.NS":"infra","HOMEFIRST.NS":"banking","IONEXCHANG.NS":"pharma",
+    "KIMS.NS":"pharma","AAVAS.NS":"banking","AFFLE.NS":"it",
+    "APTUS.NS":"banking","ARVINDFASN.NS":"fmcg","ASAHIINDIA.NS":"auto",
+    "DATAMATICS.NS":"it","GSPL.NS":"energy","PRINCEPIPE.NS":"infra",
+    "SCHAEFFLER.NS":"auto","SFL.NS":"metal","YESBANK.NS":"banking",
+    "ISEC.NS":"banking","NAUKRI.NS":"it","IRCTC.NS":"infra",
+    "MCDOWELL-N.NS":"fmcg","HONAUT.NS":"auto","PBFINTECH.NS":"it",
+}
+
+TICKER_MARKET_CAP_MIDCAP = {t: "midcap" for t in NIFTY_MIDCAP150_TICKERS}
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -281,6 +382,35 @@ def _save_disk_cache(cache: dict):
 _SCAN_CACHE: dict = _load_disk_cache()
 _MARKET_CACHE: dict = {"data": None, "status": "warming", "last_updated": None}
 
+# ── Midcap cache ──────────────────────────────────────────────────────────────
+_MIDCAP_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "swingbull_midcap_cache.json")
+
+def _load_midcap_cache() -> dict:
+    try:
+        if os.path.exists(_MIDCAP_CACHE_FILE):
+            with open(_MIDCAP_CACHE_FILE, "r") as f:
+                data = json.load(f)
+            age = _time.time() - data.get("_saved_at", 0)
+            if age < 3600:
+                logger.info(f"Loaded midcap cache from disk ({age:.0f}s old, {data.get('count',0)} results)")
+                return data
+    except Exception as e:
+        logger.warning(f"Could not load midcap disk cache: {e}")
+    return {"results": [], "status": "warming", "last_updated": None, "count": 0, "scanned": 0}
+
+def _save_midcap_cache(cache: dict):
+    try:
+        to_save = _safe_convert(dict(cache))
+        to_save["_saved_at"] = _time.time()
+        raw = json.dumps(to_save, allow_nan=False)
+        with open(_MIDCAP_CACHE_FILE, "w") as f:
+            f.write(raw)
+        logger.info(f"Midcap disk cache saved ({cache.get('count', 0)} results)")
+    except Exception as e:
+        logger.warning(f"Could not save midcap disk cache: {e}")
+
+_MIDCAP_CACHE: dict = _load_midcap_cache()
+
 
 def _run_background_scanner():
     """Runs the full stock scan in background. Updates _SCAN_CACHE when done."""
@@ -313,6 +443,36 @@ def _run_background_scanner():
             with _SCAN_LOCK:
                 _SCAN_CACHE["status"] = "error"
 
+        _time.sleep(SCAN_INTERVAL_SECONDS)
+
+
+def _run_background_midcap_scanner():
+    """Runs midcap scan in background every 5 min."""
+    global _MIDCAP_CACHE
+    logger.info("Background midcap scanner: starting...")
+    while True:
+        try:
+            logger.info("Background midcap scanner: running...")
+            results = engine.scan_stocks_public(
+                tickers        = NIFTY_MIDCAP150_TICKERS,
+                sector_map     = TICKER_SECTOR_MIDCAP,
+                market_cap_map = TICKER_MARKET_CAP_MIDCAP,
+            )
+            ts = datetime.utcnow().isoformat() + "Z"
+            with _SCAN_LOCK:
+                _MIDCAP_CACHE = {
+                    "results":      results,
+                    "status":       "ready",
+                    "last_updated": ts,
+                    "count":        len(results),
+                    "scanned":      len(NIFTY_MIDCAP150_TICKERS),
+                }
+            logger.info(f"Background midcap scanner: done — {len(results)} setups found.")
+            _save_midcap_cache(_MIDCAP_CACHE)
+        except Exception as e:
+            logger.error(f"Background midcap scanner error: {e}")
+            with _SCAN_LOCK:
+                _MIDCAP_CACHE["status"] = "error"
         _time.sleep(SCAN_INTERVAL_SECONDS)
 
 
@@ -351,9 +511,10 @@ logger.info("Keep-alive: handled by Cloudflare Worker cron")
 
 
 # ── Launch background threads NOW — all ticker lists are defined above ────────
-threading.Thread(target=_run_background_scanner, daemon=True).start()
-threading.Thread(target=_run_background_market,  daemon=True).start()
-logger.info("Background scanner + market threads launched")
+threading.Thread(target=_run_background_scanner,        daemon=True).start()
+threading.Thread(target=_run_background_midcap_scanner, daemon=True).start()
+threading.Thread(target=_run_background_market,         daemon=True).start()
+logger.info("Background scanner + midcap + market threads launched")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -457,6 +618,31 @@ def scan():
 
     except Exception as e:
         logger.exception("scan error")
+        return _err(str(e))
+
+
+# ── Midcap Scanner ───────────────────────────────────────────────────────────
+@app.route("/api/scan/midcap", methods=["GET", "POST", "OPTIONS"])
+def scan_midcap():
+    """Returns pre-computed Nifty Midcap 150 scan results from background cache."""
+    if request.method == "OPTIONS":
+        return safe_jsonify({}), 200
+    try:
+        with _SCAN_LOCK:
+            cache = dict(_MIDCAP_CACHE)
+        return safe_jsonify({
+            "status":       cache["status"],
+            "message":      "Midcap scanner warming up..." if cache["status"] == "warming" else None,
+            "results":      cache.get("results", []),
+            "count":        cache.get("count", 0),
+            "scanned":      cache.get("scanned", len(NIFTY_MIDCAP150_TICKERS)),
+            "last_updated": cache.get("last_updated"),
+            "timestamp":    datetime.utcnow().isoformat() + "Z",
+            "universe":     "midcap150",
+            "dashboard_meta": DASHBOARD_META,
+        })
+    except Exception as e:
+        logger.exception("scan/midcap error")
         return _err(str(e))
 
 
