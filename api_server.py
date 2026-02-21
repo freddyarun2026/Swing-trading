@@ -61,23 +61,42 @@ def _safe_convert(obj):
         if np.isnan(obj) or np.isinf(obj):
             return None
         return float(obj)
+    # Handle plain Python float NaN/Inf (not caught by numpy check above)
+    if isinstance(obj, float):
+        if obj != obj or obj == float("inf") or obj == float("-inf"):
+            return None
+        return obj
     if isinstance(obj, np.ndarray):
         return [_safe_convert(i) for i in obj.tolist()]
     try:
         import pandas as pd
         if isinstance(obj, pd.Timestamp):
             return obj.isoformat()
+        if isinstance(obj, pd.Series):
+            return _safe_convert(obj.tolist())
     except Exception:
         pass
     return obj
 
 
 def safe_jsonify(data):
-    """Drop-in replacement for jsonify() that handles all numpy/bool types."""
+    """Drop-in replacement for jsonify() that handles all numpy/bool/NaN types."""
+    converted = _safe_convert(data)
+    try:
+        response_str = json.dumps(converted, allow_nan=False)
+    except (ValueError, TypeError):
+        # Brute-force fallback — replace any NaN/Inf that slipped through
+        response_str = json.dumps(converted, allow_nan=True)
+        response_str = (response_str
+            .replace(": NaN",        ": null")
+            .replace(":NaN",         ":null")
+            .replace(": Infinity",   ": null")
+            .replace(":-Infinity",   ":null")
+            .replace(": -Infinity",  ": null"))
     return app.response_class(
-        response=json.dumps(_safe_convert(data)),
+        response=response_str,
         status=200,
-        mimetype='application/json'
+        mimetype="application/json"
     )
 
 
@@ -226,7 +245,7 @@ _SCAN_LOCK = threading.Lock()
 SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))  # default 5 min
 
 # ── Disk-backed cache — survives Render worker restarts ──────────────────────
-_CACHE_FILE = "/tmp/swingbull_scan_cache.json"
+_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "swingbull_scan_cache.json")
 
 def _load_disk_cache() -> dict:
     """Load scan results from disk if available and fresh (< 10 min old)."""
@@ -237,7 +256,7 @@ def _load_disk_cache() -> dict:
             # Use disk cache only if it's less than 10 minutes old
             import time as _t
             age = _t.time() - data.get("_saved_at", 0)
-            if age < 600:
+            if age < 3600:  # use disk cache if less than 60 min old
                 logger.info(f"Loaded scan cache from disk ({age:.0f}s old, {data.get('count',0)} results)")
                 return data
     except Exception as e:
@@ -245,13 +264,16 @@ def _load_disk_cache() -> dict:
     return {"results": [], "status": "warming", "last_updated": None, "count": 0, "scanned": 0}
 
 def _save_disk_cache(cache: dict):
-    """Persist scan results to disk."""
+    """Persist scan results to disk — sanitise NaN/Inf before saving."""
     try:
         import time as _t
-        to_save = dict(cache)
+        to_save = _safe_convert(dict(cache))
         to_save["_saved_at"] = _t.time()
+        # Write via safe_json string to guarantee valid JSON on disk
+        raw = json.dumps(to_save, allow_nan=False)
         with open(_CACHE_FILE, "w") as f:
-            json.dump(to_save, f, default=str)
+            f.write(raw)
+        logger.info(f"Disk cache saved ({cache.get('count', 0)} results)")
     except Exception as e:
         logger.warning(f"Could not save disk cache: {e}")
 
@@ -430,22 +452,17 @@ def scan():
         with _SCAN_LOCK:
             cache = dict(_SCAN_CACHE)
 
-        if cache["status"] == "warming":
-            return safe_jsonify({
-                "status":   "warming",
-                "message":  "Scanner is warming up — results will appear in 2–3 minutes. This only happens once after deploy.",
-                "results":  [],
-                "count":    0,
-                "scanned":  len(NIFTY50_TICKERS),
-                "dashboard_meta": DASHBOARD_META,
-            })
-
+        # Always return whatever is in cache — even if warming.
+        # Frontend gets "status: warming" with empty results on first boot,
+        # then "status: ready" with full results once scanner completes (~40s).
+        # Never block or return nothing — Render proxy kills requests > 30s.
         return safe_jsonify({
             "status":       cache["status"],
-            "results":      cache["results"],
-            "count":        cache["count"],
-            "scanned":      cache["scanned"],
-            "last_updated": cache["last_updated"],
+            "message":      "Scanner warming up — auto-refreshing..." if cache["status"] == "warming" else None,
+            "results":      cache.get("results", []),
+            "count":        cache.get("count", 0),
+            "scanned":      cache.get("scanned", len(NIFTY50_TICKERS)),
+            "last_updated": cache.get("last_updated"),
             "timestamp":    datetime.utcnow().isoformat() + "Z",
             "dashboard_meta": DASHBOARD_META,
         })
@@ -823,7 +840,7 @@ def internal_error(e):
 # ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))  # ← was 5000, Render uses 10000
+    port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     logger.info(f"Starting Swing Bull Trader API on port {port} | debug={debug}")
     app.run(host="0.0.0.0", port=port, debug=debug)
