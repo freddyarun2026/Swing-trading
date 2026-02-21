@@ -149,17 +149,100 @@ engine = SwingBullEngine(
 logger.info(f"SwingBullEngine v4 initialised — capital ₹{TOTAL_CAPITAL:,.0f}, risk {RISK_PER_TRADE}%/trade")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  BACKGROUND SCANNER
+#  ROOT CAUSE FIX: /api/scan was running ALL yfinance downloads synchronously
+#  inside the HTTP request. With 50 tickers × ~1s each = 50s+ response time,
+#  which hits Render's 30s proxy timeout and returns nothing to the frontend.
+#
+#  Fix: scanner runs in a background thread every 5 minutes.
+#  /api/scan endpoint now just returns the pre-computed cache instantly (<1ms).
+# ═══════════════════════════════════════════════════════════════════════════
+
+import time as _time
+
+_SCAN_CACHE: dict = {"results": [], "status": "warming", "last_updated": None, "count": 0, "scanned": 0}
+_MARKET_CACHE: dict = {"data": None, "status": "warming", "last_updated": None}
+_SCAN_LOCK = threading.Lock()
+
+SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))  # default 5 min
+
+
+def _run_background_scanner():
+    """Runs the full stock scan in background. Updates _SCAN_CACHE when done."""
+    global _SCAN_CACHE
+    logger.info("Background scanner: starting first scan...")
+    _first_run = True
+
+    while True:
+        try:
+            logger.info("Background scanner: running scan...")
+            results = engine.scan_stocks_public(
+                tickers        = NIFTY50_TICKERS,
+                sector_map     = TICKER_SECTOR,
+                market_cap_map = TICKER_MARKET_CAP,
+            )
+            ts = datetime.utcnow().isoformat() + "Z"
+            with _SCAN_LOCK:
+                _SCAN_CACHE = {
+                    "results":      results,
+                    "status":       "ready",
+                    "last_updated": ts,
+                    "count":        len(results),
+                    "scanned":      len(NIFTY50_TICKERS),
+                }
+            logger.info(f"Background scanner: done — {len(results)} setups found.")
+
+        except Exception as e:
+            logger.error(f"Background scanner error: {e}")
+            with _SCAN_LOCK:
+                _SCAN_CACHE["status"] = "error"
+
+        _time.sleep(SCAN_INTERVAL_SECONDS)
+
+
+def _run_background_market():
+    """Runs market regime fetch in background. Updates _MARKET_CACHE when done."""
+    global _MARKET_CACHE
+    logger.info("Background market: starting first fetch...")
+
+    while True:
+        try:
+            logger.info("Background market: fetching regime...")
+            data = engine.get_market_regime_public()
+            ts = datetime.utcnow().isoformat() + "Z"
+            with _SCAN_LOCK:
+                _MARKET_CACHE = {
+                    "data":         data,
+                    "status":       "ready",
+                    "last_updated": ts,
+                }
+            logger.info("Background market: done.")
+        except Exception as e:
+            logger.error(f"Background market error: {e}")
+            with _SCAN_LOCK:
+                _MARKET_CACHE["status"] = "error"
+
+        _time.sleep(SCAN_INTERVAL_SECONDS)
+
+
+# Launch both background threads immediately at startup
+threading.Thread(target=_run_background_scanner, daemon=True).start()
+threading.Thread(target=_run_background_market,  daemon=True).start()
+logger.info("Background scanner + market threads launched")
+
+
 # ── Keep-alive: prevents Render free tier from sleeping ──────────────────────
 def keep_alive():
-    import requests, time
-    time.sleep(60)
+    _time.sleep(60)
     self_url = os.environ.get("RENDER_EXTERNAL_URL", "https://swing-trading-indian-nse.onrender.com")
     while True:
         try:
-            requests.get(f"{self_url}/api/market-regime", timeout=30)
+            import requests as _req
+            _req.get(f"{self_url}/", timeout=10)
         except Exception:
             pass
-        time.sleep(600)
+        _time.sleep(600)
 
 threading.Thread(target=keep_alive, daemon=True).start()
 logger.info("Keep-alive thread launched")
@@ -271,13 +354,24 @@ def dashboard_meta():
 @app.route("/api/market-regime", methods=["GET"])
 def market_regime():
     """
-    Returns: Market Pulse (MPI, degrees, zone label),
-             breadth data, volatility state, sector RS rankings.
-    No authentication required — read-only market data.
+    Returns pre-computed market regime from background thread cache.
+    Responds instantly — no blocking yfinance calls on this request.
     """
     try:
-        data = engine.get_market_regime_public()
+        with _SCAN_LOCK:
+            cache = dict(_MARKET_CACHE)
+
+        if cache["status"] == "warming" or cache["data"] is None:
+            return safe_jsonify({
+                "status":  "warming",
+                "message": "Market data loading — refresh in 60 seconds.",
+                "dashboard_meta": DASHBOARD_META,
+            })
+
+        data = dict(cache["data"])
+        data["last_updated"] = cache["last_updated"]
         return safe_jsonify(data)
+
     except Exception as e:
         logger.exception("market-regime error")
         return _err(str(e))
@@ -287,31 +381,34 @@ def market_regime():
 @app.route("/api/scan", methods=["POST", "OPTIONS"])
 def scan():
     """
-    Body (optional):
-      { "tickers": ["RELIANCE.NS", "TCS.NS", ...] }
-
-    Returns list of setups sorted by confidence (best first).
-    Includes portfolio blocks and trap detection.
-    No authentication required.
+    Returns pre-computed scan results from background thread cache.
+    Responds instantly (<1ms) — no yfinance calls on this request.
+    Background thread refreshes every SCAN_INTERVAL_SECONDS (default 5 min).
     """
     if request.method == "OPTIONS":
         return safe_jsonify({}), 200
 
     try:
-        body    = request.get_json(silent=True) or {}
-        tickers = _resolve_tickers(body)
+        with _SCAN_LOCK:
+            cache = dict(_SCAN_CACHE)
 
-        results = engine.scan_stocks_public(
-            tickers       = tickers,
-            sector_map    = TICKER_SECTOR,
-            market_cap_map= TICKER_MARKET_CAP,
-        )
+        if cache["status"] == "warming":
+            return safe_jsonify({
+                "status":   "warming",
+                "message":  "Scanner is warming up — results will appear in 2–3 minutes. This only happens once after deploy.",
+                "results":  [],
+                "count":    0,
+                "scanned":  len(NIFTY50_TICKERS),
+                "dashboard_meta": DASHBOARD_META,
+            })
 
         return safe_jsonify({
-            "results": results,
-            "count":   len(results),
-            "scanned": len(tickers),
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "status":       cache["status"],
+            "results":      cache["results"],
+            "count":        cache["count"],
+            "scanned":      cache["scanned"],
+            "last_updated": cache["last_updated"],
+            "timestamp":    datetime.utcnow().isoformat() + "Z",
             "dashboard_meta": DASHBOARD_META,
         })
 
