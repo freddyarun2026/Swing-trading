@@ -64,27 +64,115 @@ import pytz
 
 IST_TZ = pytz.timezone('Asia/Kolkata')
 
-# ── Benchmark data cache (prevents Yahoo rate limiting) ──────────────────────
-_BENCHMARK_CACHE = {}
-_CACHE_TIMESTAMP = {}
+# ══════════════════════════════════════════════════════════════════════════════
+#  RATE-LIMIT RESILIENT YFINANCE LAYER
+#  Fixes: YFRateLimitError on Render cloud deployments.
+#  Strategy: unified cache + exponential backoff + threads=False + request session
+# ══════════════════════════════════════════════════════════════════════════════
+import random
+import threading
+import requests
 
-def _get_benchmark_data(ticker: str, period: str = "3mo"):
-    """Download benchmark with caching to avoid rate limits."""
-    import time
+# Shared in-memory cache (key → (dataframe, timestamp))
+_YF_CACHE: Dict[str, tuple] = {}
+_YF_CACHE_LOCK = threading.Lock()
+
+# Cache TTL constants (seconds)
+_CACHE_TTL_SHORT  = 300   # 5 min  — for 3d period (global cues)
+_CACHE_TTL_NORMAL = 900   # 15 min — for 3mo / 1y period
+_CACHE_TTL_LONG   = 1800  # 30 min — for sector indices (slow-moving)
+
+# Shared requests session with a browser-like User-Agent to reduce 429s
+_YF_SESSION = requests.Session()
+_YF_SESSION.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    )
+})
+
+def _yf_download(ticker: str, period: str = "3mo",
+                 max_retries: int = 5, base_delay: float = 2.0,
+                 ttl: int = None) -> pd.DataFrame:
+    """
+    Rate-limit resilient yfinance download with:
+      • In-memory cache (TTL-based, thread-safe)
+      • Exponential backoff + jitter on 429 / YFRateLimitError
+      • threads=False  ← critical on Render (prevents parallel hammering)
+      • Shared requests session with browser User-Agent
+    """
     cache_key = f"{ticker}_{period}"
-    now = time.time()
-    
-    # Cache valid for 15 minutes
-    if cache_key in _BENCHMARK_CACHE and (now - _CACHE_TIMESTAMP.get(cache_key, 0)) < 900:
-        return _BENCHMARK_CACHE[cache_key]
-    
-    # Download fresh data
-    df = yf.download(ticker, period=period, progress=False)
-    time.sleep(0.3)  # Rate limit delay
-    
-    _BENCHMARK_CACHE[cache_key] = df
-    _CACHE_TIMESTAMP[cache_key] = now
-    return df
+
+    # Determine TTL
+    if ttl is None:
+        ttl = _CACHE_TTL_SHORT if period in ("1d", "2d", "3d", "5d") else _CACHE_TTL_LONG if period in ("6mo", "1y", "2y") else _CACHE_TTL_NORMAL
+
+    # --- Cache read ---
+    with _YF_CACHE_LOCK:
+        if cache_key in _YF_CACHE:
+            df_cached, ts = _YF_CACHE[cache_key]
+            if (time.time() - ts) < ttl:
+                return df_cached
+
+    # --- Fetch with retry ---
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(
+                ticker,
+                period=period,
+                progress=False,
+                threads=False,       # ← CRITICAL: never run parallel on Render
+                session=_YF_SESSION,
+            )
+
+            # ── Normalise DataFrame ──────────────────────────────────────────
+            # yfinance sometimes returns MultiLevel columns like
+            # ('Close', 'RELIANCE.NS') instead of plain 'Close'.
+            # This causes NoneType / Series errors downstream. Flatten always.
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            # Drop duplicate columns (e.g. two 'Close' after flattening)
+            df = df.loc[:, ~df.columns.duplicated()]
+            # Ensure standard OHLCV columns exist
+            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                if col not in df.columns:
+                    df[col] = float('nan')
+            df = df.dropna(subset=['Close'])
+            # ────────────────────────────────────────────────────────────────
+
+            # Store in cache
+            with _YF_CACHE_LOCK:
+                _YF_CACHE[cache_key] = (df, time.time())
+            return df
+
+        except Exception as exc:
+            last_exc = exc
+            err_str = str(exc).lower()
+            is_rate_limit = any(k in err_str for k in (
+                "too many requests", "rate limit", "429",
+                "yfratelimiterror", "rate limited"
+            ))
+            if is_rate_limit and attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt) + random.uniform(0.5, 2.5)
+                logger.warning(
+                    f"[yfinance] Rate limited on '{ticker}' "
+                    f"(attempt {attempt+1}/{max_retries}). "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+            else:
+                # Non-rate-limit error — don't retry
+                break
+
+    logger.error(f"[yfinance] Failed to download '{ticker}' after {max_retries} attempts: {last_exc}")
+    return pd.DataFrame()
+
+
+def _get_benchmark_data(ticker: str, period: str = "3mo") -> pd.DataFrame:
+    """Download benchmark data (always uses shared cache + retry logic)."""
+    return _yf_download(ticker, period=period)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
 logger = logging.getLogger("swingbull.engine")
@@ -586,8 +674,7 @@ class MarketBreadthEngine:
 
         for ticker in tickers:
             try:
-                df = yf.download(ticker, period="3mo", progress=False)
-                import time; time.sleep(0.5)  # v1.1: rate limit
+                df = _yf_download(ticker, period="3mo")
                 if df.empty or len(df) < 50:
                     continue
                 close = df['Close'].squeeze()
@@ -621,8 +708,7 @@ class MarketBreadthEngine:
     def _calc_breadth_slope() -> float:
         try:
             n50 = _get_benchmark_data("^NSEI", "3mo")
-            n500 = yf.download("^CRSLDX", period="3mo", progress=False)
-            import time; time.sleep(0.5)  # v1.1: rate limit
+            n500 = _yf_download("^CRSLDX", period="3mo")
             if n50.empty or n500.empty or len(n50) < 10:
                 return 0.0
             c50 = n50['Close'].squeeze()
@@ -670,8 +756,7 @@ class VolatilityRegimeEngine:
     @staticmethod
     def detect_state(ticker: str = "^NSEI") -> Dict:
         try:
-            df = yf.download(ticker, period="3mo", progress=False)
-            import time; time.sleep(0.5)  # v1.1: rate limit
+            df = _yf_download(ticker, period="3mo")
             if df.empty:
                 return {'state': VolatilityState.COMPRESSION, 'atr_ratio': 1.0,
                         'india_vix': 15, 'details': {}}
@@ -745,7 +830,7 @@ class MarketRegimeEngine:
     def detect_regime(ticker: str = "^NSEI", breadth_data: Dict = None,
                       volatility_data: Dict = None) -> Dict:
         try:
-            df = yf.download(ticker, period="1y", progress=False)
+            df = _yf_download(ticker, period="1y")
             if df.empty:
                 return MarketRegimeEngine._default_regime()
 
@@ -928,8 +1013,7 @@ class SectorLeadershipEngine:
 
         for sector_name, sector_ticker in SECTOR_INDEX_MAP.items():
             try:
-                df = yf.download(sector_ticker, period="3mo", progress=False)
-                import time; time.sleep(0.5)  # v1.1: rate limit
+                df = _yf_download(sector_ticker, period="3mo")
                 if df.empty or len(df) < 60:
                     continue
                 close = df['Close'].squeeze()
@@ -1605,7 +1689,7 @@ class IndiaVIXEngine:
     @staticmethod
     def get_vix() -> Dict:
         try:
-            df = yf.download("^INDIAVIX", period="5d", progress=False)
+            df = _yf_download("^INDIAVIX", period="5d")
             if df.empty:
                 return {"vix": 15.0, "level": "LOW", "size_multiplier": 1.0, "icon": "🟢", "note": "VIX unavailable — default used"}
             vix = float(df["Close"].squeeze().iloc[-1])
@@ -2009,7 +2093,7 @@ class GlobalCuesEngine:
 
             for name, ticker in GlobalCuesEngine.INDICES.items():
                 try:
-                    df = yf.download(ticker, period="3d", progress=False)
+                    df = _yf_download(ticker, period="3d")
                     if df.empty or len(df) < 2:
                         continue
                     close = df["Close"].squeeze()
@@ -3041,8 +3125,7 @@ class ActiveTradeEvaluator:
                        target: float, setup_type: SetupType,
                        entry_date: datetime) -> Dict:
         try:
-            df = yf.download(ticker, period="3mo", progress=False)
-            import time; time.sleep(0.5)  # v1.1: rate limit
+            df = _yf_download(ticker, period="3mo")
             if df.empty:
                 return {'error': 'Unable to fetch data'}
 
@@ -3426,10 +3509,13 @@ class SwingBullEngine:
         """Public scanner — no auth required."""
         sector_data = self._get_sector_data()
         results = []
-        for ticker in tickers:
+        for i, ticker in enumerate(tickers):
+            # Small inter-ticker delay to avoid rate-limit bursts on Render.
+            # Cached tickers return instantly; only uncached ones hit the network.
+            if i > 0:
+                time.sleep(random.uniform(0.3, 0.8))
             try:
-                df = yf.download(ticker, period="3mo", progress=False)
-                import time; time.sleep(0.5)  # v1.1: rate limit
+                df = _yf_download(ticker, period="3mo")
                 if df.empty:
                     continue
                 sector = (sector_map or {}).get(ticker, "")
@@ -3546,8 +3632,7 @@ class SwingBullEngine:
         sector_data = self._get_sector_data()
 
         # Fetch stock data
-        df = yf.download(ticker, period="3mo", progress=False)
-        import time; time.sleep(0.5)  # v1.1: rate limit
+        df = _yf_download(ticker, period="3mo")
         if df.empty:
             return {'error': f'No data for {ticker}'}
 
