@@ -222,11 +222,42 @@ TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}
 
 import time as _time
 
-_SCAN_CACHE: dict = {"results": [], "status": "warming", "last_updated": None, "count": 0, "scanned": 0}
-_MARKET_CACHE: dict = {"data": None, "status": "warming", "last_updated": None}
 _SCAN_LOCK = threading.Lock()
-
 SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))  # default 5 min
+
+# ── Disk-backed cache — survives Render worker restarts ──────────────────────
+_CACHE_FILE = "/tmp/swingbull_scan_cache.json"
+
+def _load_disk_cache() -> dict:
+    """Load scan results from disk if available and fresh (< 10 min old)."""
+    try:
+        if os.path.exists(_CACHE_FILE):
+            with open(_CACHE_FILE, "r") as f:
+                data = json.load(f)
+            # Use disk cache only if it's less than 10 minutes old
+            import time as _t
+            age = _t.time() - data.get("_saved_at", 0)
+            if age < 600:
+                logger.info(f"Loaded scan cache from disk ({age:.0f}s old, {data.get('count',0)} results)")
+                return data
+    except Exception as e:
+        logger.warning(f"Could not load disk cache: {e}")
+    return {"results": [], "status": "warming", "last_updated": None, "count": 0, "scanned": 0}
+
+def _save_disk_cache(cache: dict):
+    """Persist scan results to disk."""
+    try:
+        import time as _t
+        to_save = dict(cache)
+        to_save["_saved_at"] = _t.time()
+        with open(_CACHE_FILE, "w") as f:
+            json.dump(to_save, f, default=str)
+    except Exception as e:
+        logger.warning(f"Could not save disk cache: {e}")
+
+# Initialise from disk on startup — instant results if recently deployed
+_SCAN_CACHE: dict = _load_disk_cache()
+_MARKET_CACHE: dict = {"data": None, "status": "warming", "last_updated": None}
 
 
 def _run_background_scanner():
@@ -253,6 +284,7 @@ def _run_background_scanner():
                     "scanned":      len(NIFTY50_TICKERS),
                 }
             logger.info(f"Background scanner: done — {len(results)} setups found.")
+            _save_disk_cache(_SCAN_CACHE)  # persist so restarts load instantly
 
         except Exception as e:
             logger.error(f"Background scanner error: {e}")
@@ -292,15 +324,17 @@ def _run_background_market():
 
 # ── Keep-alive: prevents Render free tier from sleeping ──────────────────────
 def keep_alive():
-    _time.sleep(60)
+    _time.sleep(30)  # wait for server to be fully up
     self_url = os.environ.get("RENDER_EXTERNAL_URL", "https://swing-trading-indian-nse.onrender.com")
     while True:
         try:
             import requests as _req
-            _req.get(f"{self_url}/", timeout=10)
-        except Exception:
-            pass
-        _time.sleep(600)
+            # Ping /api/scan (GET) — keeps the process alive AND warms the route
+            _req.get(f"{self_url}/api/scan", timeout=15)
+            logger.info("Keep-alive ping sent")
+        except Exception as e:
+            logger.warning(f"Keep-alive ping failed: {e}")
+        _time.sleep(240)  # every 4 min — before Render's 5min idle restart
 
 threading.Thread(target=keep_alive, daemon=True).start()
 logger.info("Keep-alive thread launched")
@@ -382,7 +416,7 @@ def market_regime():
 
 
 # ── Stock Scanner ────────────────────────────────────────────────────────────
-@app.route("/api/scan", methods=["POST", "OPTIONS"])
+@app.route("/api/scan", methods=["GET", "POST", "OPTIONS"])
 def scan():
     """
     Returns pre-computed scan results from background thread cache.
