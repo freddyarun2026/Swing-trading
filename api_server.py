@@ -345,21 +345,9 @@ def _run_background_market():
 
 
 # ── Keep-alive: prevents Render free tier from sleeping ──────────────────────
-def keep_alive():
-    _time.sleep(30)  # wait for server to be fully up
-    self_url = os.environ.get("RENDER_EXTERNAL_URL", "https://swing-trading-indian-nse.onrender.com")
-    while True:
-        try:
-            import requests as _req
-            # Ping /api/scan (GET) — keeps the process alive AND warms the route
-            _req.get(f"{self_url}/api/scan", timeout=15)
-            logger.info("Keep-alive ping sent")
-        except Exception as e:
-            logger.warning(f"Keep-alive ping failed: {e}")
-        _time.sleep(240)  # every 4 min — before Render's 5min idle restart
-
-threading.Thread(target=keep_alive, daemon=True).start()
-logger.info("Keep-alive thread launched")
+# Keep-alive: Cloudflare Worker cron handles warming now.
+# Internal self-ping removed — it caused timeout warnings on Render.
+logger.info("Keep-alive: handled by Cloudflare Worker cron")
 
 
 # ── Launch background threads NOW — all ticker lists are defined above ────────
