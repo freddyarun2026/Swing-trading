@@ -71,7 +71,6 @@ IST_TZ = pytz.timezone('Asia/Kolkata')
 # ══════════════════════════════════════════════════════════════════════════════
 import random
 import threading
-import requests
 
 # Shared in-memory cache (key → (dataframe, timestamp))
 _YF_CACHE: Dict[str, tuple] = {}
@@ -82,15 +81,9 @@ _CACHE_TTL_SHORT  = 300   # 5 min  — for 3d period (global cues)
 _CACHE_TTL_NORMAL = 900   # 15 min — for 3mo / 1y period
 _CACHE_TTL_LONG   = 1800  # 30 min — for sector indices (slow-moving)
 
-# Shared requests session with a browser-like User-Agent to reduce 429s
-_YF_SESSION = requests.Session()
-_YF_SESSION.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
-    )
-})
+# NOTE: Do NOT pass a requests.Session to yfinance — newer versions require
+# curl_cffi and will reject a plain requests.Session with an error.
+# Let yfinance manage its own session internally.
 
 def _yf_download(ticker: str, period: str = "3mo",
                  max_retries: int = 5, base_delay: float = 2.0,
@@ -124,7 +117,6 @@ def _yf_download(ticker: str, period: str = "3mo",
                 period=period,
                 progress=False,
                 threads=False,       # ← CRITICAL: never run parallel on Render
-                session=_YF_SESSION,
             )
 
             # ── Normalise DataFrame ──────────────────────────────────────────
