@@ -150,6 +150,67 @@ logger.info(f"SwingBullEngine v4 initialised — capital ₹{TOTAL_CAPITAL:,.0f}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  STOCK UNIVERSE (Nifty 50 default + sector mapping)
+# ═══════════════════════════════════════════════════════════════════════════
+
+NIFTY50_TICKERS = [
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
+    "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
+    "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS", "SUNPHARMA.NS",
+    "TITAN.NS", "ULTRACEMCO.NS", "BAJFINANCE.NS", "NESTLEIND.NS", "HCLTECH.NS",
+    "WIPRO.NS", "TECHM.NS", "M&M.NS", "POWERGRID.NS", "NTPC.NS",
+    "COALINDIA.NS", "JSWSTEEL.NS", "TATASTEEL.NS", "BAJAJFINSV.NS", "DRREDDY.NS",
+    "CIPLA.NS", "DIVISLAB.NS", "APOLLOHOSP.NS", "EICHERMOT.NS", "GRASIM.NS",
+    "ADANIENT.NS", "ADANIPORTS.NS", "INDUSINDBK.NS", "HINDALCO.NS", "BPCL.NS",
+    "ONGC.NS", "TATACONSUM.NS", "BRITANNIA.NS", "HEROMOTOCO.NS", "SHRIRAMFIN.NS",
+    "BAJAJ-AUTO.NS", "TRENT.NS", "BEL.NS", "VEDL.NS", "SBILIFE.NS",
+]
+
+# Map ticker → sector (for RS and sector-cap checks)
+TICKER_SECTOR = {
+    "HDFCBANK.NS": "banking",   "ICICIBANK.NS": "banking",
+    "SBIN.NS": "banking",       "KOTAKBANK.NS": "banking",
+    "AXISBANK.NS": "banking",   "INDUSINDBK.NS": "banking",
+    "SHRIRAMFIN.NS": "banking", "BAJFINANCE.NS": "banking",
+    "BAJAJFINSV.NS": "banking", "SBILIFE.NS": "banking",
+
+    "TCS.NS": "it",             "INFY.NS": "it",
+    "HCLTECH.NS": "it",         "WIPRO.NS": "it",
+    "TECHM.NS": "it",
+
+    "SUNPHARMA.NS": "pharma",   "DRREDDY.NS": "pharma",
+    "CIPLA.NS": "pharma",       "DIVISLAB.NS": "pharma",
+    "APOLLOHOSP.NS": "pharma",
+
+    "MARUTI.NS": "auto",        "M&M.NS": "auto",
+    "EICHERMOT.NS": "auto",     "BAJAJ-AUTO.NS": "auto",
+    "HEROMOTOCO.NS": "auto",
+
+    "JSWSTEEL.NS": "metal",     "TATASTEEL.NS": "metal",
+    "HINDALCO.NS": "metal",     "VEDL.NS": "metal",
+
+    "RELIANCE.NS": "energy",    "ONGC.NS": "energy",
+    "BPCL.NS": "energy",        "NTPC.NS": "energy",
+    "POWERGRID.NS": "energy",   "COALINDIA.NS": "energy",
+
+    "LT.NS": "infra",           "ADANIPORTS.NS": "infra",
+    "ADANIENT.NS": "infra",     "BEL.NS": "infra",
+
+    "HINDUNILVR.NS": "fmcg",    "ITC.NS": "fmcg",
+    "NESTLEIND.NS": "fmcg",     "BRITANNIA.NS": "fmcg",
+    "TATACONSUM.NS": "fmcg",    "TRENT.NS": "fmcg",
+
+    "ASIANPAINT.NS": "fmcg",    "TITAN.NS": "fmcg",
+    "BHARTIARTL.NS": "infra",   "GRASIM.NS": "infra",
+    "ULTRACEMCO.NS": "infra",
+}
+
+# Map ticker → market-cap category
+TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  BACKGROUND SCANNER
 #  ROOT CAUSE FIX: /api/scan was running ALL yfinance downloads synchronously
 #  inside the HTTP request. With 50 tickers × ~1s each = 50s+ response time,
@@ -226,10 +287,7 @@ def _run_background_market():
         _time.sleep(SCAN_INTERVAL_SECONDS)
 
 
-# Launch both background threads immediately at startup
-threading.Thread(target=_run_background_scanner, daemon=True).start()
-threading.Thread(target=_run_background_market,  daemon=True).start()
-logger.info("Background scanner + market threads launched")
+# NOTE: threads are launched AFTER ticker lists are defined — see below
 
 
 # ── Keep-alive: prevents Render free tier from sleeping ──────────────────────
@@ -248,64 +306,10 @@ threading.Thread(target=keep_alive, daemon=True).start()
 logger.info("Keep-alive thread launched")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  STOCK UNIVERSE (Nifty 50 default + sector mapping)
-# ═══════════════════════════════════════════════════════════════════════════
-
-NIFTY50_TICKERS = [
-    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
-    "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
-    "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS", "SUNPHARMA.NS",
-    "TITAN.NS", "ULTRACEMCO.NS", "BAJFINANCE.NS", "NESTLEIND.NS", "HCLTECH.NS",
-    "WIPRO.NS", "TECHM.NS", "M&M.NS", "POWERGRID.NS", "NTPC.NS",
-    "COALINDIA.NS", "JSWSTEEL.NS", "TATASTEEL.NS", "BAJAJFINSV.NS", "DRREDDY.NS",
-    "CIPLA.NS", "DIVISLAB.NS", "APOLLOHOSP.NS", "EICHERMOT.NS", "GRASIM.NS",
-    "ADANIENT.NS", "ADANIPORTS.NS", "INDUSINDBK.NS", "HINDALCO.NS", "BPCL.NS",
-    "ONGC.NS", "TATACONSUM.NS", "BRITANNIA.NS", "HEROMOTOCO.NS", "SHRIRAMFIN.NS",
-    "BAJAJ-AUTO.NS", "TRENT.NS", "BEL.NS", "VEDL.NS", "SBILIFE.NS",
-]
-
-# Map ticker → sector (for RS and sector-cap checks)
-TICKER_SECTOR = {
-    "HDFCBANK.NS": "banking",   "ICICIBANK.NS": "banking",
-    "SBIN.NS": "banking",       "KOTAKBANK.NS": "banking",
-    "AXISBANK.NS": "banking",   "INDUSINDBK.NS": "banking",
-    "SHRIRAMFIN.NS": "banking", "BAJFINANCE.NS": "banking",
-    "BAJAJFINSV.NS": "banking", "SBILIFE.NS": "banking",
-
-    "TCS.NS": "it",             "INFY.NS": "it",
-    "HCLTECH.NS": "it",         "WIPRO.NS": "it",
-    "TECHM.NS": "it",
-
-    "SUNPHARMA.NS": "pharma",   "DRREDDY.NS": "pharma",
-    "CIPLA.NS": "pharma",       "DIVISLAB.NS": "pharma",
-    "APOLLOHOSP.NS": "pharma",
-
-    "MARUTI.NS": "auto",        "M&M.NS": "auto",
-    "EICHERMOT.NS": "auto",     "BAJAJ-AUTO.NS": "auto",
-    "HEROMOTOCO.NS": "auto",
-
-    "JSWSTEEL.NS": "metal",     "TATASTEEL.NS": "metal",
-    "HINDALCO.NS": "metal",     "VEDL.NS": "metal",
-
-    "RELIANCE.NS": "energy",    "ONGC.NS": "energy",
-    "BPCL.NS": "energy",        "NTPC.NS": "energy",
-    "POWERGRID.NS": "energy",   "COALINDIA.NS": "energy",
-
-    "LT.NS": "infra",           "ADANIPORTS.NS": "infra",
-    "ADANIENT.NS": "infra",     "BEL.NS": "infra",
-
-    "HINDUNILVR.NS": "fmcg",    "ITC.NS": "fmcg",
-    "NESTLEIND.NS": "fmcg",     "BRITANNIA.NS": "fmcg",
-    "TATACONSUM.NS": "fmcg",    "TRENT.NS": "fmcg",
-
-    "ASIANPAINT.NS": "fmcg",    "TITAN.NS": "fmcg",
-    "BHARTIARTL.NS": "infra",   "GRASIM.NS": "infra",
-    "ULTRACEMCO.NS": "infra",
-}
-
-# Map ticker → market-cap category
-TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}
+# ── Launch background threads NOW — all ticker lists are defined above ────────
+threading.Thread(target=_run_background_scanner, daemon=True).start()
+threading.Thread(target=_run_background_market,  daemon=True).start()
+logger.info("Background scanner + market threads launched")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
