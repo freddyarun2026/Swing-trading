@@ -823,7 +823,7 @@ def internal_error(e):
 # ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))  # ← was 5000, Render uses 10000
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     logger.info(f"Starting Swing Bull Trader API on port {port} | debug={debug}")
     app.run(host="0.0.0.0", port=port, debug=debug)
