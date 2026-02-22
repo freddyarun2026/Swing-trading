@@ -599,60 +599,124 @@ logger.info("Background threads started. Nifty50 scan enqueued.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  APPWRITE DATABASE LAYER
-#  REST API only — no SDK needed, requests already in requirements.txt
+#  AIRTABLE DATABASE LAYER
+#  REST API with requests — no SDK needed
+#  Free tier: permanent, no request limits for normal usage
 # ═══════════════════════════════════════════════════════════════════════════
 import uuid as _uuid
 
-APPWRITE_ENDPOINT   = "https://cloud.appwrite.io/v1"
-APPWRITE_PROJECT_ID = os.environ.get("APPWRITE_PROJECT_ID", "699b22a1003915cbba9c")
-APPWRITE_API_KEY    = os.environ.get("APPWRITE_API_KEY", "")
-APPWRITE_DB_ID      = os.environ.get("APPWRITE_DB_ID", "699b22c30007056c3be0")
+AIRTABLE_TOKEN   = os.environ.get("AIRTABLE_TOKEN", "")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "appHkCoOBFjegr1UW")
+AIRTABLE_API     = "https://api.airtable.com/v0"
 
-COL_ACTIVE   = "active_trades"
-COL_LOG      = "trade_log"
-COL_CLOSED   = "closed_trades"
-COL_REVIEWS  = "eod_reviews"
+# Table names — created automatically on first use
+TBL_ACTIVE   = "active_trades"
+TBL_LOG      = "trade_log"
+TBL_CLOSED   = "closed_trades"
+TBL_REVIEWS  = "eod_reviews"
 
-def _aw_headers():
+def _at_headers():
     return {
-        "Content-Type":       "application/json",
-        "X-Appwrite-Project": APPWRITE_PROJECT_ID,
-        "X-Appwrite-Key":     APPWRITE_API_KEY,
+        "Authorization": f"Bearer {AIRTABLE_TOKEN}",
+        "Content-Type":  "application/json",
     }
 
-def _aw_create(collection: str, data: dict) -> dict:
-    doc_id = str(_uuid.uuid4()).replace("-", "")[:20]
-    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents"
-    r = requests.post(url, headers=_aw_headers(),
-                      json={"documentId": doc_id, "data": _safe_convert(data)}, timeout=10)
-    r.raise_for_status()
-    return r.json()
+def _at_fields(data: dict) -> dict:
+    """Convert all values to Airtable-safe types."""
+    safe = {}
+    for k, v in data.items():
+        if isinstance(v, bool):
+            safe[k] = v
+        elif isinstance(v, (int, float)):
+            safe[k] = v
+        elif v is None:
+            pass  # skip None fields
+        else:
+            safe[k] = str(v)
+    return safe
 
-def _aw_list(collection: str, queries: list = None) -> list:
-    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents"
-    params = [("queries[]", q) for q in (queries or [])]
-    r = requests.get(url, headers=_aw_headers(), params=params, timeout=10)
+def _at_create(table: str, data: dict) -> dict:
+    """Create a record in Airtable."""
+    url = f"{AIRTABLE_API}/{AIRTABLE_BASE_ID}/{table}"
+    r = requests.post(url, headers=_at_headers(),
+                      json={"fields": _at_fields(data)}, timeout=10)
     r.raise_for_status()
-    return r.json().get("documents", [])
+    rec = r.json()
+    return {"$id": rec["id"], **rec.get("fields", {})}
 
-def _aw_get(collection: str, doc_id: str) -> dict:
-    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents/{doc_id}"
-    r = requests.get(url, headers=_aw_headers(), timeout=10)
-    r.raise_for_status()
-    return r.json()
+def _at_list(table: str, formula: str = None) -> list:
+    """List all records from Airtable table."""
+    url = f"{AIRTABLE_API}/{AIRTABLE_BASE_ID}/{table}"
+    params = {"pageSize": 100}
+    if formula:
+        params["filterByFormula"] = formula
+    records = []
+    while True:
+        r = requests.get(url, headers=_at_headers(), params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        for rec in data.get("records", []):
+            records.append({"$id": rec["id"], **rec.get("fields", {})})
+        offset = data.get("offset")
+        if not offset:
+            break
+        params["offset"] = offset
+    return records
 
-def _aw_update(collection: str, doc_id: str, data: dict) -> dict:
-    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents/{doc_id}"
-    r = requests.patch(url, headers=_aw_headers(),
-                       json={"data": _safe_convert(data)}, timeout=10)
+def _at_get(table: str, record_id: str) -> dict:
+    """Get a single record from Airtable."""
+    url = f"{AIRTABLE_API}/{AIRTABLE_BASE_ID}/{table}/{record_id}"
+    r = requests.get(url, headers=_at_headers(), timeout=10)
     r.raise_for_status()
-    return r.json()
+    rec = r.json()
+    return {"$id": rec["id"], **rec.get("fields", {})}
 
-def _aw_delete(collection: str, doc_id: str):
-    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents/{doc_id}"
-    r = requests.delete(url, headers=_aw_headers(), timeout=10)
+def _at_update(table: str, record_id: str, data: dict) -> dict:
+    """Update a record in Airtable."""
+    url = f"{AIRTABLE_API}/{AIRTABLE_BASE_ID}/{table}/{record_id}"
+    r = requests.patch(url, headers=_at_headers(),
+                       json={"fields": _at_fields(data)}, timeout=10)
     r.raise_for_status()
+    rec = r.json()
+    return {"$id": rec["id"], **rec.get("fields", {})}
+
+def _at_delete(table: str, record_id: str):
+    """Delete a record from Airtable."""
+    url = f"{AIRTABLE_API}/{AIRTABLE_BASE_ID}/{table}/{record_id}"
+    r = requests.delete(url, headers=_at_headers(), timeout=10)
+    r.raise_for_status()
+
+def _at_ensure_tables():
+    """
+    Create Airtable tables if they don't exist.
+    Airtable Meta API — creates tables with a single text field.
+    Additional fields are created automatically when records are written.
+    """
+    if not AIRTABLE_TOKEN:
+        logger.warning("AIRTABLE_TOKEN not set — trade storage disabled")
+        return
+    try:
+        url = f"https://api.airtable.com/v0/meta/bases/{AIRTABLE_BASE_ID}/tables"
+        r = requests.get(url, headers=_at_headers(), timeout=10)
+        r.raise_for_status()
+        existing = {t["name"] for t in r.json().get("tables", [])}
+        needed   = [TBL_ACTIVE, TBL_LOG, TBL_CLOSED, TBL_REVIEWS]
+        for tbl in needed:
+            if tbl not in existing:
+                requests.post(url, headers=_at_headers(), timeout=10, json={
+                    "name": tbl,
+                    "fields": [{"name": "ticker", "type": "singleLineText"}]
+                })
+                logger.info(f"Airtable: created table {tbl}")
+            else:
+                logger.info(f"Airtable: table {tbl} exists ✅")
+    except Exception as e:
+        logger.warning(f"Airtable table check failed: {e}")
+
+# Create tables on startup
+_at_ensure_tables()
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  UTILITY
@@ -682,7 +746,7 @@ def _resolve_tickers(body: dict) -> list:
 @app.route("/api/trades/active", methods=["GET"])
 def get_active_trades():
     try:
-        docs = _aw_list(COL_ACTIVE, queries=['orderDesc("entry_date")'])
+        docs = _at_list(TBL_ACTIVE)
         return safe_jsonify({"trades": docs, "count": len(docs)})
     except Exception as e:
         logger.exception("get_active_trades error")
@@ -717,7 +781,7 @@ def add_trade():
             "risk_reward":       rr,
             "notes":             b.get("notes", ""),
         }
-        doc = _aw_create(COL_ACTIVE, trade)
+        doc = _at_create(TBL_ACTIVE, trade)
         logger.info(f"Trade added: {b['ticker']} entry={entry}")
         return safe_jsonify({"success": True, "trade": doc})
     except Exception as e:
@@ -734,7 +798,7 @@ def eod_review():
         trade_id = b.get("trade_id")
         if not trade_id: return _err("Missing trade_id", 400)
 
-        trade        = _aw_get(COL_ACTIVE, trade_id)
+        trade        = _at_get(TBL_ACTIVE, trade_id)
         ticker       = trade["ticker"]
         entry        = float(trade["entry_price"])
         sl           = float(trade["stop_loss"])
@@ -799,7 +863,7 @@ def eod_review():
                 recs.append({"type":"HOLD","urgency":"LOW",
                     "message":f"✅ Setup intact. {pnl_pct}% ({r_mult}R). Hold."})
 
-        _aw_create(COL_REVIEWS, {
+        _at_create(TBL_REVIEWS, {
             "trade_id": trade_id, "ticker": ticker,
             "review_date": datetime.utcnow().isoformat() + "Z",
             "current_price": current, "pnl_pct": pnl_pct,
@@ -826,7 +890,7 @@ def record_action():
         action   = b.get("action")
         if not trade_id or not action: return _err("Missing trade_id or action", 400)
 
-        trade = _aw_get(COL_ACTIVE, trade_id)
+        trade = _at_get(TBL_ACTIVE, trade_id)
         log_entry = {
             "trade_id": trade_id, "ticker": trade["ticker"],
             "action": action, "action_date": datetime.utcnow().isoformat() + "Z",
@@ -835,14 +899,14 @@ def record_action():
             "new_sl": float(b.get("new_sl", trade.get("stop_loss", 0))),
             "notes": b.get("notes", ""),
         }
-        _aw_create(COL_LOG, log_entry)
+        _at_create(TBL_LOG, log_entry)
 
         if action == "TRAIL_SL":
-            _aw_update(COL_ACTIVE, trade_id, {"stop_loss": float(b["new_sl"])})
+            _at_update(TBL_ACTIVE, trade_id, {"stop_loss": float(b["new_sl"])})
             return safe_jsonify({"success": True, "message": f"SL updated to {b['new_sl']}"})
 
         elif action == "REVISE_TARGET":
-            _aw_update(COL_ACTIVE, trade_id, {"target2": float(b["new_target2"])})
+            _at_update(TBL_ACTIVE, trade_id, {"target2": float(b["new_target2"])})
             return safe_jsonify({"success": True, "message": f"Target updated to {b['new_target2']}"})
 
         elif action == "PARTIAL_EXIT":
@@ -850,7 +914,7 @@ def record_action():
             exit_price = float(b.get("price", 0))
             remaining  = trade["quantity"] - exit_qty
             pnl        = round((exit_price - float(trade["entry_price"])) * exit_qty, 2)
-            _aw_update(COL_ACTIVE, trade_id, {
+            _at_update(TBL_ACTIVE, trade_id, {
                 "quantity": remaining, "partial_exit_done": True,
                 "partial_exit_price": exit_price, "partial_exit_qty": exit_qty,
                 "partial_pnl": pnl,
@@ -873,14 +937,14 @@ def record_action():
                 "exit_date": datetime.utcnow().isoformat() + "Z",
                 "exit_pnl": pnl, "total_pnl": total_pnl,
                 "pnl_pct": pnl_pct, "outcome": outcome, "days_held": days_held})
-            _aw_create(COL_CLOSED, closed)
-            _aw_delete(COL_ACTIVE, trade_id)
+            _at_create(TBL_CLOSED, closed)
+            _at_delete(TBL_ACTIVE, trade_id)
             logger.info(f"Trade closed: {trade['ticker']} {outcome} PnL=₹{total_pnl}")
             return safe_jsonify({"success": True, "outcome": outcome, "total_pnl": total_pnl})
 
         elif action == "PYRAMID":
             new_qty = trade["quantity"] + int(b.get("quantity", 1))
-            _aw_update(COL_ACTIVE, trade_id, {"quantity": new_qty})
+            _at_update(TBL_ACTIVE, trade_id, {"quantity": new_qty})
             return safe_jsonify({"success": True, "message": f"Position increased to {new_qty}"})
 
         return _err(f"Unknown action: {action}", 400)
@@ -893,7 +957,7 @@ def record_action():
 @app.route("/api/trades/performance", methods=["GET"])
 def trade_performance():
     try:
-        trades = _aw_list(COL_CLOSED, queries=['orderDesc("exit_date")'])
+        trades = _at_list(TBL_CLOSED)
         if not trades:
             return safe_jsonify({"message": "No closed trades yet.", "stats": {}, "recent_trades": []})
 
