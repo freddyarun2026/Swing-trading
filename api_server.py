@@ -136,6 +136,35 @@ from trading_engine_v4 import (
 #  APP SETUP
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ── Live NSE index constituent fetcher ───────────────────────────────────────
+_NSE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://niftyindices.com",
+}
+
+_NSE_URLS = {
+    "nifty50":     "https://niftyindices.com/IndexConstituent/ind_nifty50list.csv",
+    "midcap150":   "https://niftyindices.com/IndexConstituent/ind_niftymidcap150list.csv",
+}
+
+def _fetch_nse_tickers(index: str) -> list:
+    """Fetch live official ticker list from NSE. Falls back to hardcoded list on failure."""
+    import requests, csv, io
+    url = _NSE_URLS.get(index)
+    if not url:
+        return []
+    try:
+        resp = requests.get(url, headers=_NSE_HEADERS, timeout=15)
+        resp.raise_for_status()
+        reader = csv.DictReader(io.StringIO(resp.text))
+        tickers = [f"{row['Symbol'].strip()}.NS" for row in reader if row.get('Symbol')]
+        if len(tickers) > 10:
+            logger.info(f"[NSE] Fetched {len(tickers)} live tickers for {index}")
+            return tickers
+    except Exception as e:
+        logger.warning(f"[NSE] Could not fetch live {index} tickers: {e} — using hardcoded list")
+    return []  # caller falls back to hardcoded
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
@@ -169,10 +198,10 @@ logger.info(f"SwingBullEngine v4 initialised — capital ₹{TOTAL_CAPITAL:,.0f}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  STOCK UNIVERSE (Nifty 50 default + sector mapping)
+#  STOCK UNIVERSE — Live from NSE with hardcoded fallback
 # ═══════════════════════════════════════════════════════════════════════════
 
-NIFTY50_TICKERS = [
+_NIFTY50_FALLBACK = [
     "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
     "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
     "LT.NS", "AXISBANK.NS", "ASIANPAINT.NS", "MARUTI.NS", "SUNPHARMA.NS",
@@ -184,6 +213,9 @@ NIFTY50_TICKERS = [
     "ONGC.NS", "TATACONSUM.NS", "BRITANNIA.NS", "HEROMOTOCO.NS", "SHRIRAMFIN.NS",
     "BAJAJ-AUTO.NS", "TRENT.NS", "BEL.NS", "VEDL.NS", "SBILIFE.NS",
 ]
+
+NIFTY50_TICKERS = _fetch_nse_tickers("nifty50") or _NIFTY50_FALLBACK
+logger.info(f"Nifty50 universe: {len(NIFTY50_TICKERS)} tickers")
 
 # Map ticker → sector (for RS and sector-cap checks)
 TICKER_SECTOR = {
@@ -228,7 +260,7 @@ TICKER_SECTOR = {
 TICKER_MARKET_CAP = {t: "largecap" for t in NIFTY50_TICKERS}
 
 # ── Nifty Midcap 150 universe ─────────────────────────────────────────────
-NIFTY_MIDCAP150_TICKERS = [
+_MIDCAP150_FALLBACK = [
     "ABCAPITAL.NS","ABFRL.NS","AIAENG.NS","ALKEM.NS","AMBUJACEM.NS",
     "APLAPOLLO.NS","ASTRAL.NS","ATUL.NS","AUBANK.NS","BALKRISIND.NS",
     "BANKINDIA.NS","BATAINDIA.NS","BERGEPAINT.NS","BHARATFORG.NS","BHEL.NS",
@@ -257,10 +289,13 @@ NIFTY_MIDCAP150_TICKERS = [
     "ASAHIINDIA.NS","BSOFT.NS","CARBORUNIV.NS","CDSL.NS","CLEAN.NS",
     "DATAMATICS.NS","DELHIVERY.NS","DOMS.NS","EPIGRAL.NS","FINEORG.NS",
     "FINPIPE.NS","GLAND.NS","GRINDWELL.NS","HOMEFIRST.NS","IONEXCHANG.NS",
-    "ICICISecurities.NS","ITI.NS","JYOTHYLAB.NS","KALYANKJIL.NS","KFINTECH.NS",
+    "ICICIGI.NS","ITI.NS","JYOTHYLAB.NS","KALYANKJIL.NS","KFINTECH.NS",
     "KIMS.NS","LATENTVIEW.NS","MAPMYINDIA.NS","METROPOLIS.NS","NAZARA.NS",
     "NETWORK18.NS","NLCINDIA.NS","NYKAA.NS","PAYTM.NS",
 ]
+
+NIFTY_MIDCAP150_TICKERS = _fetch_nse_tickers("midcap150") or _MIDCAP150_FALLBACK
+logger.info(f"Midcap150 universe: {len(NIFTY_MIDCAP150_TICKERS)} tickers")
 
 TICKER_SECTOR_MIDCAP = {
     "BANKINDIA.NS":"banking","CANBK.NS":"banking","CANFINHOME.NS":"banking",
@@ -268,7 +303,7 @@ TICKER_SECTOR_MIDCAP = {
     "IDFCFIRSTB.NS":"banking","LTF.NS":"banking","LICHSGFIN.NS":"banking",
     "MUTHOOTFIN.NS":"banking","PNB.NS":"banking","RBLBANK.NS":"banking",
     "RECLTD.NS":"banking","UJJIVANSFB.NS":"banking","UNIONBANK.NS":"banking",
-    "ABCAPITAL.NS":"banking","ANGELONE.NS":"banking","ICICISecurities.NS":"banking",
+    "ABCAPITAL.NS":"banking","ANGELONE.NS":"banking","ICICIGI.NS":"banking",
     "KFINTECH.NS":"banking","STARHEALTH.NS":"banking","MFSL.NS":"banking",
 
     "COFORGE.NS":"it","KPITTECH.NS":"it","MPHASIS.NS":"it",
@@ -322,7 +357,7 @@ TICKER_SECTOR_MIDCAP = {
     "APTUS.NS":"banking","ARVINDFASN.NS":"fmcg","ASAHIINDIA.NS":"auto",
     "DATAMATICS.NS":"it","GSPL.NS":"energy","PRINCEPIPE.NS":"infra",
     "SCHAEFFLER.NS":"auto","SFL.NS":"metal","YESBANK.NS":"banking",
-    "ICICISecurities.NS":"banking","NAUKRI.NS":"it","IRCTC.NS":"infra",
+    "ICICIGI.NS":"banking","NAUKRI.NS":"it","IRCTC.NS":"infra",
     "UNITDSPR.NS":"fmcg","HONAUT.NS":"auto","PBFINTECH.NS":"it",
 }
 
