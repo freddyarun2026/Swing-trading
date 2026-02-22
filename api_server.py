@@ -172,7 +172,7 @@ logging.basicConfig(
 logger = logging.getLogger("swingbull.api")
 
 app = Flask(__name__)
-app.json_encoder = NumpyEncoder          # ← use numpy-safe encoder globally
+# json_encoder removed — deprecated in Flask 3.x. safe_jsonify() handles all serialization.
 
 # ── CORS: allow your frontend origins ─────────────────────────────────────
 # Allow all Cloudflare Pages preview URLs + Cloudflare Worker + localhost
@@ -403,179 +403,158 @@ TICKER_MARKET_CAP_MIDCAP = {t: "midcap" for t in NIFTY_MIDCAP150_TICKERS}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  BACKGROUND SCANNER — QUEUE-BASED (one scan at a time, no OOM)
+#  CACHE LAYER — Disk-based, process-safe
 #
-#  Architecture:
-#    - ONE scanner thread processes a queue of scan jobs
-#    - Nifty50 scans every 5 min automatically (enqueued by scheduler thread)
-#    - Midcap scans on first request (enqueued by /api/scan/midcap route)
-#    - If both queued simultaneously, they run one after the other — never both at once
-#    - 512MB Render free tier safe: only 1 yfinance scan in memory at any time
+#  ROOT CAUSE of previous failures:
+#    gunicorn sync worker FORKS a child process to serve HTTP requests.
+#    Background threads run in the PARENT process.
+#    Parent and child have SEPARATE memory — child never sees thread updates.
+#    This is proven by os.fork() tests: child always reads stale cache.
+#
+#  PERMANENT FIX:
+#    Disk is the ONLY shared state between all processes on the same machine.
+#    Background thread writes scan results to disk every 5 min.
+#    HTTP route reads from disk on every request — always sees latest results.
+#    No inter-process memory sharing required. Works with any gunicorn config.
 # ═══════════════════════════════════════════════════════════════════════════
 
 import time as _time
 import queue as _queue
 
-_SCAN_LOCK     = threading.Lock()   # protects cache dicts
-_SCAN_QUEUE    = _queue.Queue()     # job queue: "nifty50" or "midcap"
-SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))  # 5 min
+_SCAN_LOCK  = threading.Lock()   # protects in-flight scan flag only
+_SCAN_QUEUE = _queue.Queue()     # job queue: "nifty50" or "midcap"
+SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))
 
-# ── Disk-backed cache — survives Render worker restarts ──────────────────────
-_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "swingbull_scan_cache.json")
-_MIDCAP_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "swingbull_midcap_cache.json")
+# ── Disk cache paths ──────────────────────────────────────────────────────────
+_CACHE_DIR       = os.path.dirname(os.path.abspath(__file__))
+_CACHE_FILE      = os.path.join(_CACHE_DIR, "swingbull_scan_cache.json")
+_MIDCAP_CACHE_FILE = os.path.join(_CACHE_DIR, "swingbull_midcap_cache.json")
 
-def _load_disk_cache(filepath: str) -> dict:
+def _read_cache(filepath: str) -> dict:
+    """Read cache from disk. Always fresh — written by background thread."""
     try:
         if os.path.exists(filepath):
             with open(filepath, "r") as f:
                 data = json.load(f)
+            # Accept disk cache up to 20 minutes old
             age = _time.time() - data.get("_saved_at", 0)
-            if age < 3600:
-                logger.info(f"Loaded cache from disk: {filepath} ({age:.0f}s old, {data.get('count',0)} results)")
+            if age < 1200:
                 return data
     except Exception as e:
-        logger.warning(f"Could not load disk cache {filepath}: {e}")
+        logger.warning(f"Cache read error {filepath}: {e}")
     return {"results": [], "status": "warming", "last_updated": None, "count": 0, "scanned": 0}
 
-def _save_disk_cache(filepath: str, cache: dict):
+def _write_cache(filepath: str, data: dict):
+    """Write cache to disk atomically."""
     try:
-        to_save = _safe_convert(dict(cache))
+        to_save = _safe_convert(dict(data))
         to_save["_saved_at"] = _time.time()
-        raw = json.dumps(to_save, allow_nan=False)
-        with open(filepath, "w") as f:
-            f.write(raw)
-        logger.info(f"Cache saved to disk: {filepath} ({cache.get('count', 0)} results)")
+        # Write to temp file then rename — atomic on Linux, no partial reads
+        tmp = filepath + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(to_save, f, allow_nan=False)
+        os.replace(tmp, filepath)
+        logger.info(f"Cache written: {os.path.basename(filepath)} ({data.get('count', 0)} results)")
     except Exception as e:
-        logger.warning(f"Could not save disk cache {filepath}: {e}")
+        logger.warning(f"Cache write error {filepath}: {e}")
 
-# Initialise caches from disk on startup
-_SCAN_CACHE:   dict = _load_disk_cache(_CACHE_FILE)
-_MIDCAP_CACHE: dict = _load_disk_cache(_MIDCAP_CACHE_FILE)
+# ── Market cache — in-memory only (lightweight, no scan) ─────────────────────
 _MARKET_CACHE: dict = {"data": None, "status": "warming", "last_updated": None}
 
 
+# ── Single scanner worker — one job at a time, no OOM ────────────────────────
 def _scanner_worker():
     """
-    Single worker thread — processes scan jobs one at a time from the queue.
-    Guarantees only ONE yfinance scan runs at any given time → no OOM.
-    Job values: "nifty50" or "midcap"
+    Processes scan jobs from queue ONE AT A TIME.
+    Writes results to DISK — readable by HTTP worker process regardless of fork.
     """
-    # Using .update() on shared dicts — no global reassignment needed
-    logger.info("Scanner worker thread started — waiting for jobs...")
-
+    logger.info("Scanner worker started")
     while True:
         try:
-            job = _SCAN_QUEUE.get(timeout=60)  # block until a job arrives
+            job = _SCAN_QUEUE.get(timeout=60)
         except _queue.Empty:
             continue
-
         try:
             if job == "nifty50":
-                logger.info("Scanner worker: running Nifty50 scan...")
+                logger.info("Scanner: running Nifty50...")
                 results = engine.scan_stocks_public(
-                    tickers        = NIFTY50_TICKERS,
-                    sector_map     = TICKER_SECTOR,
-                    market_cap_map = TICKER_MARKET_CAP,
+                    tickers=NIFTY50_TICKERS,
+                    sector_map=TICKER_SECTOR,
+                    market_cap_map=TICKER_MARKET_CAP,
                 )
-                ts = datetime.utcnow().isoformat() + "Z"
-                with _SCAN_LOCK:
-                    _SCAN_CACHE.update({
-                        "results":      results,
-                        "status":       "ready",
-                        "last_updated": ts,
-                        "count":        len(results),
-                        "scanned":      len(NIFTY50_TICKERS),
-                    })
-                logger.info(f"Scanner worker: Nifty50 done — {len(results)} setups.")
-                _save_disk_cache(_CACHE_FILE, _SCAN_CACHE)
+                _write_cache(_CACHE_FILE, {
+                    "results": results, "status": "ready",
+                    "last_updated": datetime.utcnow().isoformat() + "Z",
+                    "count": len(results), "scanned": len(NIFTY50_TICKERS),
+                })
+                logger.info(f"Scanner: Nifty50 done — {len(results)} setups")
 
             elif job == "midcap":
-                logger.info("Scanner worker: running Midcap150 scan...")
+                logger.info("Scanner: running Midcap150...")
                 results = engine.scan_stocks_public(
-                    tickers        = NIFTY_MIDCAP150_TICKERS,
-                    sector_map     = TICKER_SECTOR_MIDCAP,
-                    market_cap_map = TICKER_MARKET_CAP_MIDCAP,
+                    tickers=NIFTY_MIDCAP150_TICKERS,
+                    sector_map=TICKER_SECTOR_MIDCAP,
+                    market_cap_map=TICKER_MARKET_CAP_MIDCAP,
                 )
-                ts = datetime.utcnow().isoformat() + "Z"
-                with _SCAN_LOCK:
-                    _MIDCAP_CACHE.update({
-                        "results":      results,
-                        "status":       "ready",
-                        "last_updated": ts,
-                        "count":        len(results),
-                        "scanned":      len(NIFTY_MIDCAP150_TICKERS),
-                    })
-                logger.info(f"Scanner worker: Midcap150 done — {len(results)} setups.")
-                _save_disk_cache(_MIDCAP_CACHE_FILE, _MIDCAP_CACHE)
+                _write_cache(_MIDCAP_CACHE_FILE, {
+                    "results": results, "status": "ready",
+                    "last_updated": datetime.utcnow().isoformat() + "Z",
+                    "count": len(results), "scanned": len(NIFTY_MIDCAP150_TICKERS),
+                })
+                logger.info(f"Scanner: Midcap150 done — {len(results)} setups")
 
         except Exception as e:
-            logger.error(f"Scanner worker error (job={job}): {e}")
-            # Reset status so frontend knows something went wrong
-            with _SCAN_LOCK:
-                if job == "nifty50":
-                    _SCAN_CACHE["status"] = "error"
-                elif job == "midcap":
-                    _MIDCAP_CACHE["status"] = "error"
+            logger.error(f"Scanner error (job={job}): {e}")
         finally:
             _SCAN_QUEUE.task_done()
 
 
 def _nifty50_scheduler():
-    """Enqueues a nifty50 scan job every SCAN_INTERVAL_SECONDS.
-    Skips if queue already has any pending job — never starves midcap."""
+    """Enqueues nifty50 scan every 5 min. Skips if queue has pending jobs."""
     while True:
         _time.sleep(SCAN_INTERVAL_SECONDS)
-        queue_items = list(_SCAN_QUEUE.queue)
-        # Only enqueue nifty50 if queue is completely empty
-        # This ensures midcap jobs are never pushed behind a pile of nifty50s
-        if len(queue_items) == 0:
+        if _SCAN_QUEUE.empty():
             _SCAN_QUEUE.put("nifty50")
-            logger.info("Scheduler: nifty50 scan enqueued")
-        else:
-            logger.info(f"Scheduler: queue has {len(queue_items)} pending jobs — skipping nifty50 enqueue")
+            logger.info("Scheduler: nifty50 enqueued")
 
 
 def _market_regime_worker():
-    """Fetches market regime in background every 5 min. Starts after 90s delay."""
-    # .update() used — no global reassignment needed
-    _time.sleep(90)  # let nifty50 first scan start first
+    """Fetches market regime every 5 min. In-memory only — lightweight."""
+    global _MARKET_CACHE
+    _time.sleep(90)
     while True:
         try:
             logger.info("Market regime: fetching...")
             data = engine.get_market_regime_public()
-            ts = datetime.utcnow().isoformat() + "Z"
             with _SCAN_LOCK:
-                _MARKET_CACHE.update({"data": data, "status": "ready", "last_updated": ts})
-            logger.info("Market regime: done.")
+                _MARKET_CACHE = {
+                    "data": data, "status": "ready",
+                    "last_updated": datetime.utcnow().isoformat() + "Z",
+                }
+            logger.info("Market regime: done")
         except Exception as e:
             logger.error(f"Market regime error: {e}")
         _time.sleep(SCAN_INTERVAL_SECONDS)
 
 
-# ── Thread launcher with auto-restart ────────────────────────────────────────
-def _watched_thread(target, name):
-    """Wraps a thread target to auto-restart if it crashes."""
+def _start_thread(target, name):
+    """Start a daemon thread that auto-restarts on crash."""
     def wrapper():
         while True:
             try:
-                logger.info(f"Thread '{name}' starting...")
                 target()
             except Exception as e:
                 logger.error(f"Thread '{name}' crashed: {e} — restarting in 5s")
                 _time.sleep(5)
-    t = threading.Thread(target=wrapper, daemon=True, name=name)
-    t.start()
-    return t
+    threading.Thread(target=wrapper, daemon=True, name=name).start()
 
-_watched_thread(_scanner_worker,       "scanner-worker")
-_watched_thread(_nifty50_scheduler,    "nifty50-scheduler")
-_watched_thread(_market_regime_worker, "market-regime")
+_start_thread(_scanner_worker,    "scanner-worker")
+_start_thread(_nifty50_scheduler, "nifty50-scheduler")
+_start_thread(_market_regime_worker, "market-regime")
 
-# Enqueue first nifty50 scan immediately
+# Enqueue first nifty50 scan immediately on startup
 _SCAN_QUEUE.put("nifty50")
-logger.info("All background threads launched. First nifty50 scan enqueued.")
-logger.info("Keep-alive: handled by Cloudflare Worker cron")
-
+logger.info("Background threads started. Nifty50 scan enqueued.")
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  UTILITY
@@ -658,13 +637,10 @@ def scan():
         return safe_jsonify({}), 200
 
     try:
-        with _SCAN_LOCK:
-            cache = dict(_SCAN_CACHE)
+        # Read from disk — the ONLY shared state between gunicorn processes.
+        # Background thread writes here; HTTP worker reads here. No memory sharing needed.
+        cache = _read_cache(_CACHE_FILE)
 
-        # Always return whatever is in cache — even if warming.
-        # Frontend gets "status: warming" with empty results on first boot,
-        # then "status: ready" with full results once scanner completes (~40s).
-        # Never block or return nothing — Render proxy kills requests > 30s.
         return safe_jsonify({
             "status":       cache["status"],
             "message":      "Scanner warming up — auto-refreshing..." if cache["status"] == "warming" else None,
@@ -692,8 +668,8 @@ def scan_midcap():
     if request.method == "OPTIONS":
         return safe_jsonify({}), 200
     try:
-        with _SCAN_LOCK:
-            cache = dict(_MIDCAP_CACHE)
+        # Read from disk — same reason as /api/scan (gunicorn fork isolation)
+        cache = _read_cache(_MIDCAP_CACHE_FILE)
 
         if cache["status"] == "ready":
             return safe_jsonify({
