@@ -36,7 +36,7 @@ import numpy as np
 import threading
 from datetime import datetime
 from flask import Flask, jsonify, request
-from flask_cors import CORS
+# flask_cors replaced by custom wildcard CORS handler below
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -175,16 +175,53 @@ app = Flask(__name__)
 app.json_encoder = NumpyEncoder          # ← use numpy-safe encoder globally
 
 # ── CORS: allow your frontend origins ─────────────────────────────────────
-ALLOWED_ORIGINS = [
-    o.strip()
-    for o in os.environ.get(
-        "ALLOWED_ORIGINS",
-        "https://swingtraderindia.netlify.app,http://localhost:3000,http://localhost:5500"
-    ).split(",")
-    if o.strip()
-]
+# Allow all Cloudflare Pages preview URLs + Cloudflare Worker + localhost
+import re as _re
 
-CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
+def _is_allowed_origin(origin: str) -> bool:
+    if not origin:
+        return False
+    # Exact matches
+    exact = [
+        "https://swing-trader-dashboard.pages.dev",
+        "https://swing-trader-worker.swingbulltrader.workers.dev",
+        "http://localhost:3000",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+    ]
+    if origin in exact:
+        return True
+    # Wildcard: any *.swing-trader-dashboard.pages.dev preview URL
+    if _re.match(r"^https://[a-z0-9]+\.swing-trader-dashboard\.pages\.dev$", origin):
+        return True
+    return False
+
+class _WildcardCORS:
+    """Flask-CORS replacement that supports wildcard origin matching."""
+    pass
+
+# Use after_request hook for CORS — gives us full control per-request
+@app.after_request
+def _add_cors(response):
+    origin = request.headers.get("Origin", "")
+    if _is_allowed_origin(origin):
+        response.headers["Access-Control-Allow-Origin"]  = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Vary"] = "Origin"
+    return response
+
+@app.before_request
+def _handle_options():
+    if request.method == "OPTIONS":
+        origin = request.headers.get("Origin", "")
+        resp = app.make_default_options_response()
+        if _is_allowed_origin(origin):
+            resp.headers["Access-Control-Allow-Origin"]  = origin
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+            resp.headers["Vary"] = "Origin"
+        return resp
 
 # ── Engine: initialised once at startup ────────────────────────────────────
 TOTAL_CAPITAL    = float(os.environ.get("TOTAL_CAPITAL",    "1000000"))
@@ -484,13 +521,18 @@ def _scanner_worker():
 
 
 def _nifty50_scheduler():
-    """Enqueues a nifty50 scan job every SCAN_INTERVAL_SECONDS."""
+    """Enqueues a nifty50 scan job every SCAN_INTERVAL_SECONDS.
+    Skips if queue already has any pending job — never starves midcap."""
     while True:
-        # Skip if a nifty50 job is already in queue (don't pile up)
-        if not any(item == "nifty50" for item in list(_SCAN_QUEUE.queue)):
+        _time.sleep(SCAN_INTERVAL_SECONDS)
+        queue_items = list(_SCAN_QUEUE.queue)
+        # Only enqueue nifty50 if queue is completely empty
+        # This ensures midcap jobs are never pushed behind a pile of nifty50s
+        if len(queue_items) == 0:
             _SCAN_QUEUE.put("nifty50")
             logger.info("Scheduler: nifty50 scan enqueued")
-        _time.sleep(SCAN_INTERVAL_SECONDS)
+        else:
+            logger.info(f"Scheduler: queue has {len(queue_items)} pending jobs — skipping nifty50 enqueue")
 
 
 def _market_regime_worker():
@@ -655,15 +697,21 @@ def scan_midcap():
                 "dashboard_meta": DASHBOARD_META,
             })
 
-        # Enqueue midcap scan if not already queued — worker processes it after nifty50
+        # Enqueue midcap scan if not already queued
         queue_items = list(_SCAN_QUEUE.queue)
         if "midcap" not in queue_items:
             _SCAN_QUEUE.put("midcap")
-            logger.info("Midcap scan enqueued — will run after any active scan completes")
+            logger.info("Midcap scan enqueued")
+            # Reset status so frontend gets accurate warming message
+            with _SCAN_LOCK:
+                _MIDCAP_CACHE["status"] = "warming"
+
+        qsize = _SCAN_QUEUE.qsize()
+        wait_msg = "Midcap scan running — results ready in ~2 minutes." if qsize <= 1                    else f"Midcap scan queued (position {qsize}) — results ready soon."
 
         return safe_jsonify({
             "status":   "warming",
-            "message":  "Midcap scan queued — results ready in ~2 minutes. Auto-refreshing...",
+            "message":  wait_msg + " Auto-refreshing...",
             "results":  [],
             "count":    0,
             "scanned":  len(NIFTY_MIDCAP150_TICKERS),
