@@ -688,9 +688,6 @@ def scan_midcap():
         if "midcap" not in queue_items:
             _SCAN_QUEUE.put("midcap")
             logger.info("Midcap scan enqueued")
-            # Reset status so frontend gets accurate warming message
-            with _SCAN_LOCK:
-                _MIDCAP_CACHE["status"] = "warming"
 
         qsize = _SCAN_QUEUE.qsize()
         wait_msg = "Midcap scan running — results ready in ~2 minutes." if qsize <= 1                    else f"Midcap scan queued (position {qsize}) — results ready soon."
