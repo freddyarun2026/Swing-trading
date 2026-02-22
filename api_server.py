@@ -235,14 +235,14 @@ NIFTY_MIDCAP150_TICKERS = [
     "BIOCON.NS","BOSCHLTD.NS","CANBK.NS","CANFINHOME.NS","CASTROLIND.NS",
     "CEATLTD.NS","CENTRALBK.NS","CESC.NS","CHOLAFIN.NS","COFORGE.NS",
     "COLPAL.NS","CONCOR.NS","COROMANDEL.NS","CROMPTON.NS","CUMMINSIND.NS",
-    "DABUR.NS","DALBHARAT.NS","DEEPAKNTR.NS","DELTACORP.NS","DIXON.NS",
-    "ESCORTS.NS","EXIDEIND.NS","FEDERALBNK.NS","GAIL.NS","GMRINFRA.NS",
+    "DABUR.NS","DALBHARAT.NS","DEEPAKNTR.NS","DELTAMAGNT.NS","DIXON.NS",
+    "ESCORTS.NS","EXIDEIND.NS","FEDERALBNK.NS","GAIL.NS","GMRAIRPORT.NS",
     "GODREJCP.NS","GODREJPROP.NS","GRANULES.NS","GSPL.NS","HAVELLS.NS",
     "HFCL.NS","HONAUT.NS","IDFCFIRSTB.NS","IGL.NS","INDUSTOWER.NS",
     "INOXWIND.NS","IOC.NS","IPCALAB.NS","IRCTC.NS","JKCEMENT.NS",
     "JSL.NS","JUBLFOOD.NS","KAJARIACER.NS","KEC.NS","KPITTECH.NS",
-    "L&TFH.NS","LALPATHLAB.NS","LICHSGFIN.NS","LUPIN.NS","MARICO.NS",
-    "MCDOWELL-N.NS","MCX.NS","MFSL.NS","MOTHERSON.NS","MPHASIS.NS",
+    "LTF.NS","LALPATHLAB.NS","LICHSGFIN.NS","LUPIN.NS","MARICO.NS",
+    "UNITDSPR.NS","MCX.NS","MFSL.NS","MOTHERSON.NS","MPHASIS.NS",
     "MRF.NS","MUTHOOTFIN.NS","NAUKRI.NS","NBCC.NS","NCC.NS",
     "NMDC.NS","OBEROIRLTY.NS","OFSS.NS","OIL.NS","PAGEIND.NS",
     "PERSISTENT.NS","PETRONET.NS","PFIZER.NS","PIDILITIND.NS","PIIND.NS",
@@ -257,7 +257,7 @@ NIFTY_MIDCAP150_TICKERS = [
     "ASAHIINDIA.NS","BSOFT.NS","CARBORUNIV.NS","CDSL.NS","CLEAN.NS",
     "DATAMATICS.NS","DELHIVERY.NS","DOMS.NS","EPIGRAL.NS","FINEORG.NS",
     "FINPIPE.NS","GLAND.NS","GRINDWELL.NS","HOMEFIRST.NS","IONEXCHANG.NS",
-    "ISEC.NS","ITI.NS","JYOTHYLAB.NS","KALYANKJIL.NS","KFINTECH.NS",
+    "ICICISecurities.NS","ITI.NS","JYOTHYLAB.NS","KALYANKJIL.NS","KFINTECH.NS",
     "KIMS.NS","LATENTVIEW.NS","MAPMYINDIA.NS","METROPOLIS.NS","NAZARA.NS",
     "NETWORK18.NS","NLCINDIA.NS","NYKAA.NS","PAYTM.NS",
 ]
@@ -265,10 +265,10 @@ NIFTY_MIDCAP150_TICKERS = [
 TICKER_SECTOR_MIDCAP = {
     "BANKINDIA.NS":"banking","CANBK.NS":"banking","CANFINHOME.NS":"banking",
     "CENTRALBK.NS":"banking","CHOLAFIN.NS":"banking","FEDERALBNK.NS":"banking",
-    "IDFCFIRSTB.NS":"banking","L&TFH.NS":"banking","LICHSGFIN.NS":"banking",
+    "IDFCFIRSTB.NS":"banking","LTF.NS":"banking","LICHSGFIN.NS":"banking",
     "MUTHOOTFIN.NS":"banking","PNB.NS":"banking","RBLBANK.NS":"banking",
     "RECLTD.NS":"banking","UJJIVANSFB.NS":"banking","UNIONBANK.NS":"banking",
-    "ABCAPITAL.NS":"banking","ANGELONE.NS":"banking","ISEC.NS":"banking",
+    "ABCAPITAL.NS":"banking","ANGELONE.NS":"banking","ICICISecurities.NS":"banking",
     "KFINTECH.NS":"banking","STARHEALTH.NS":"banking","MFSL.NS":"banking",
 
     "COFORGE.NS":"it","KPITTECH.NS":"it","MPHASIS.NS":"it",
@@ -291,14 +291,14 @@ TICKER_SECTOR_MIDCAP = {
     "TATAPOWER.NS":"energy","CESC.NS":"energy","GSPL.NS":"energy",
     "IGL.NS":"energy","PETRONET.NS":"energy","INOXWIND.NS":"energy",
 
-    "GMRINFRA.NS":"infra","KEC.NS":"infra","NBCC.NS":"infra",
+    "GMRAIRPORT.NS":"infra","KEC.NS":"infra","NBCC.NS":"infra",
     "NCC.NS":"infra","CONCOR.NS":"infra","INDUSTOWER.NS":"infra",
     "HFCL.NS":"infra","BHEL.NS":"infra","ITI.NS":"infra","NLCINDIA.NS":"infra",
 
     "ABFRL.NS":"fmcg","BATAINDIA.NS":"fmcg","COLPAL.NS":"fmcg",
     "CROMPTON.NS":"fmcg","DABUR.NS":"fmcg","GODREJCP.NS":"fmcg",
     "HAVELLS.NS":"fmcg","JUBLFOOD.NS":"fmcg","MARICO.NS":"fmcg",
-    "MCDOWELL-N.NS":"fmcg","PAGEIND.NS":"fmcg","SYMPHONY.NS":"fmcg",
+    "UNITDSPR.NS":"fmcg","PAGEIND.NS":"fmcg","SYMPHONY.NS":"fmcg",
     "UBL.NS":"fmcg","WHIRLPOOL.NS":"fmcg","JYOTHYLAB.NS":"fmcg",
     "KALYANKJIL.NS":"fmcg","NYKAA.NS":"fmcg",
 
@@ -312,7 +312,7 @@ TICKER_SECTOR_MIDCAP = {
     "SKFINDIA.NS":"auto","SRF.NS":"pharma","SUNTV.NS":"fmcg",
     "SUPREMEIND.NS":"infra","TATACOMM.NS":"it","TATACHEM.NS":"pharma",
     "TORNTPOWER.NS":"energy","ATUL.NS":"pharma","AUBANK.NS":"banking",
-    "DELTACORP.NS":"fmcg","SUMICHEM.NS":"pharma","VOLTAS.NS":"fmcg",
+    "DELTAMAGNT.NS":"fmcg","SUMICHEM.NS":"pharma","VOLTAS.NS":"fmcg",
     "ZEEL.NS":"fmcg","DELHIVERY.NS":"infra","NAZARA.NS":"it",
     "NETWORK18.NS":"fmcg","PAYTM.NS":"it","CDSL.NS":"banking",
     "CLEAN.NS":"energy","FINEORG.NS":"pharma","GRINDWELL.NS":"metal",
@@ -322,8 +322,8 @@ TICKER_SECTOR_MIDCAP = {
     "APTUS.NS":"banking","ARVINDFASN.NS":"fmcg","ASAHIINDIA.NS":"auto",
     "DATAMATICS.NS":"it","GSPL.NS":"energy","PRINCEPIPE.NS":"infra",
     "SCHAEFFLER.NS":"auto","SFL.NS":"metal","YESBANK.NS":"banking",
-    "ISEC.NS":"banking","NAUKRI.NS":"it","IRCTC.NS":"infra",
-    "MCDOWELL-N.NS":"fmcg","HONAUT.NS":"auto","PBFINTECH.NS":"it",
+    "ICICISecurities.NS":"banking","NAUKRI.NS":"it","IRCTC.NS":"infra",
+    "UNITDSPR.NS":"fmcg","HONAUT.NS":"auto","PBFINTECH.NS":"it",
 }
 
 TICKER_MARKET_CAP_MIDCAP = {t: "midcap" for t in NIFTY_MIDCAP150_TICKERS}
@@ -447,9 +447,10 @@ def _run_background_scanner():
 
 
 def _run_background_midcap_scanner():
-    """Runs midcap scan in background every 5 min."""
+    """Runs midcap scan in background — staggered 3min after nifty50 to avoid OOM."""
     global _MIDCAP_CACHE
-    logger.info("Background midcap scanner: starting...")
+    logger.info("Background midcap scanner: starting (delayed 3min)...")
+    _time.sleep(180)  # wait for nifty50 scan to finish first
     while True:
         try:
             logger.info("Background midcap scanner: running...")
@@ -477,10 +478,10 @@ def _run_background_midcap_scanner():
 
 
 def _run_background_market():
-    """Runs market regime fetch in background. Updates _MARKET_CACHE when done."""
+    """Runs market regime fetch in background — staggered 1.5min after startup."""
     global _MARKET_CACHE
-    logger.info("Background market: starting first fetch...")
-
+    logger.info("Background market: starting (delayed 90s)...")
+    _time.sleep(90)  # let nifty50 scanner start first
     while True:
         try:
             logger.info("Background market: fetching regime...")
