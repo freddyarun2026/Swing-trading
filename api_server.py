@@ -623,15 +623,17 @@ def _at_headers():
     }
 
 def _at_fields(data: dict) -> dict:
-    """Convert all values to Airtable-safe types."""
+    """Convert all values to Airtable-safe types.
+    Airtable only accepts: string, number. Booleans must be strings.
+    """
     safe = {}
     for k, v in data.items():
-        if isinstance(v, bool):
-            safe[k] = v
+        if v is None:
+            continue  # skip None
+        elif isinstance(v, bool):
+            safe[k] = "true" if v else "false"
         elif isinstance(v, (int, float)):
             safe[k] = v
-        elif v is None:
-            pass  # skip None fields
         else:
             safe[k] = str(v)
     return safe
