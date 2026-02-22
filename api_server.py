@@ -552,6 +552,25 @@ def _market_regime_worker():
         _time.sleep(SCAN_INTERVAL_SECONDS)
 
 
+def _sectors_worker():
+    """Fetches sector rankings in background every 30 min. Writes to disk."""
+    _time.sleep(60)  # wait for startup to settle
+    while True:
+        try:
+            logger.info("Sectors: fetching...")
+            data = SectorLeadershipEngine.analyze_sectors()
+            if data:
+                _write_cache(_SECTORS_CACHE_FILE, {
+                    "sectors": data,
+                    "status": "ready",
+                    "last_updated": datetime.utcnow().isoformat() + "Z",
+                })
+                logger.info(f"Sectors: done — {len(data)} sectors")
+        except Exception as e:
+            logger.error(f"Sectors error: {e}")
+        _time.sleep(1800)  # refresh every 30 min
+
+
 def _start_thread(target, name):
     def wrapper():
         while True:
