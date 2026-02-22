@@ -866,6 +866,10 @@ def add_trade():
             "risk_reward":       rr,
             "trade_notes":       b.get("notes", ""),
         }
+        # Check for existing open trade for same ticker
+        existing = _at_list(TBL_ACTIVE, formula=f"{{ticker}}='{b['ticker']}'")
+        if existing:
+            return safe_jsonify({"success": False, "error": f"{b['ticker']} already in active trades"})
         doc = _at_create(TBL_ACTIVE, trade)
         logger.info(f"Trade added: {b['ticker']} entry={entry}")
         return safe_jsonify({"success": True, "trade": doc})
@@ -1017,11 +1021,28 @@ def record_action():
             entry_dt    = datetime.fromisoformat(trade["entry_date"].replace("Z",""))
             days_held   = (datetime.utcnow() - entry_dt).days
 
-            closed = {k: v for k, v in trade.items() if not k.startswith("$")}
-            closed.update({"exit_price": exit_price,
-                "exit_date": datetime.utcnow().isoformat() + "Z",
-                "exit_pnl": pnl, "total_pnl": total_pnl,
-                "pnl_pct": pnl_pct, "outcome": outcome, "days_held": days_held})
+            # Only send known closed_trades schema fields
+            closed = {
+                "ticker":       trade.get("ticker",""),
+                "entry_price":  entry_price,
+                "stop_loss":    float(trade.get("stop_loss", 0)),
+                "target1":      float(trade.get("target1", 0)),
+                "target2":      float(trade.get("target2", 0)),
+                "setup_type":   str(trade.get("setup_type", "")),
+                "sector":       str(trade.get("sector", "")),
+                "universe":     str(trade.get("universe", "")),
+                "quantity":     qty,
+                "entry_date":   str(trade.get("entry_date", "")),
+                "exit_price":   exit_price,
+                "exit_date":    datetime.utcnow().isoformat() + "Z",
+                "exit_pnl":     pnl,
+                "total_pnl":    total_pnl,
+                "pnl_pct":      pnl_pct,
+                "outcome":      outcome,
+                "days_held":    days_held,
+                "partial_pnl":  float(trade.get("partial_pnl", 0)),
+                "risk_reward":  float(trade.get("risk_reward", 0)),
+            }
             _at_create(TBL_CLOSED, closed)
             _at_delete(TBL_ACTIVE, trade_id)
             logger.info(f"Trade closed: {trade['ticker']} {outcome} PnL=₹{total_pnl}")
@@ -1077,6 +1098,25 @@ def trade_performance():
         })
     except Exception as e:
         logger.exception("trade_performance error")
+        return _err(str(e))
+
+
+@app.route("/api/trades/cleanup", methods=["POST"])
+def cleanup_duplicates():
+    """Delete duplicate trades keeping only the latest per ticker."""
+    try:
+        all_trades = _at_list(TBL_ACTIVE)
+        seen = {}
+        deleted = 0
+        for t in all_trades:
+            ticker = t.get("ticker","")
+            if ticker in seen:
+                _at_delete(TBL_ACTIVE, t["$id"])
+                deleted += 1
+            else:
+                seen[ticker] = t["$id"]
+        return safe_jsonify({"success": True, "deleted": deleted, "remaining": len(seen)})
+    except Exception as e:
         return _err(str(e))
 
 
