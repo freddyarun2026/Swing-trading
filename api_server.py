@@ -706,10 +706,10 @@ _AT_SCHEMA = {
         {"name": "universe",          "type": "singleLineText"},
         {"name": "quantity",          "type": "number", "options": {"precision": 0}},
         {"name": "entry_date",        "type": "singleLineText"},
-        {"name": "status",            "type": "singleLineText"},
+        {"name": "trade_status",      "type": "singleLineText"},
         {"name": "partial_exit_done", "type": "singleLineText"},
         {"name": "risk_reward",       "type": "number", "options": {"precision": 2}},
-        {"name": "notes",             "type": "singleLineText"},
+        {"name": "trade_notes",       "type": "singleLineText"},
         {"name": "partial_exit_price","type": "number", "options": {"precision": 2}},
         {"name": "partial_exit_qty",  "type": "number", "options": {"precision": 0}},
         {"name": "partial_pnl",       "type": "number", "options": {"precision": 2}},
@@ -723,7 +723,7 @@ _AT_SCHEMA = {
         {"name": "quantity",    "type": "number", "options": {"precision": 0}},
         {"name": "old_sl",      "type": "number", "options": {"precision": 2}},
         {"name": "new_sl",      "type": "number", "options": {"precision": 2}},
-        {"name": "notes",       "type": "singleLineText"},
+        {"name": "trade_notes", "type": "singleLineText"},
     ],
     TBL_CLOSED: [
         {"name": "ticker",       "type": "singleLineText"},
@@ -861,10 +861,10 @@ def add_trade():
             "universe":          b.get("universe", "nifty50"),
             "quantity":          int(b.get("quantity", 1)),
             "entry_date":        datetime.utcnow().isoformat() + "Z",
-            "status":            "open",
-            "partial_exit_done": False,
+            "trade_status":      "open",
+            "partial_exit_done": "false",
             "risk_reward":       rr,
-            "notes":             b.get("notes", ""),
+            "trade_notes":       b.get("notes", ""),
         }
         doc = _at_create(TBL_ACTIVE, trade)
         logger.info(f"Trade added: {b['ticker']} entry={entry}")
@@ -982,7 +982,7 @@ def record_action():
             "price": float(b.get("price", 0)), "quantity": int(b.get("quantity", 0)),
             "old_sl": float(trade.get("stop_loss", 0)),
             "new_sl": float(b.get("new_sl", trade.get("stop_loss", 0))),
-            "notes": b.get("notes", ""),
+            "trade_notes": b.get("notes", ""),
         }
         _at_create(TBL_LOG, log_entry)
 
