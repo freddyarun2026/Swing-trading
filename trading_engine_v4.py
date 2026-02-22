@@ -142,6 +142,15 @@ def _yf_download(ticker: str, period: str = "3mo",
         except Exception as exc:
             last_exc = exc
             err_str = str(exc).lower()
+
+            # Delisted / not found — return empty immediately, no retries, no error log
+            if any(k in err_str for k in (
+                "no data found", "delisted", "404", "not found",
+                "no price data", "symbol may be delisted", "quote not found"
+            )):
+                logger.debug(f"[yfinance] '{ticker}' not found/delisted — skipping")
+                return pd.DataFrame()
+
             is_rate_limit = any(k in err_str for k in (
                 "too many requests", "rate limit", "429",
                 "yfratelimiterror", "rate limited"
@@ -155,10 +164,10 @@ def _yf_download(ticker: str, period: str = "3mo",
                 )
                 time.sleep(delay)
             else:
-                # Non-rate-limit error — don't retry
+                # Other error — don't retry
                 break
 
-    logger.error(f"[yfinance] Failed to download '{ticker}' after {max_retries} attempts: {last_exc}")
+    logger.debug(f"[yfinance] Could not download '{ticker}': {last_exc}")
     return pd.DataFrame()
 
 
@@ -2275,15 +2284,27 @@ class SetupClassifier:
                        days_to_earnings: int = 999, beta: float = 1.0,
                        sector_data: Dict = None) -> Dict:
         try:
+            # Guard: need at least 60 rows for all indicators to be valid
+            if df is None or df.empty or len(df) < 60:
+                raise ValueError(f"Insufficient data for {ticker}: {len(df) if df is not None else 0} rows")
+
             close = df['Close'].squeeze()
             high = df['High'].squeeze()
             low = df['Low'].squeeze()
             volume = df['Volume'].squeeze()
 
+            # Guard: ensure Series not empty after squeeze
+            if not isinstance(close, pd.Series) or len(close) < 60:
+                raise ValueError(f"Invalid close series for {ticker}")
+
             ema20 = ta.ema(close, 20)
             ema50 = ta.ema(close, 50)
             rsi = ta.rsi(close, 14)
             atr = ta.atr(high, low, close, 14)
+
+            # Guard: ensure indicators computed successfully
+            if ema20 is None or ema50 is None or rsi is None or atr is None:
+                raise ValueError(f"Indicator computation failed for {ticker}")
 
             curr_price = close.iloc[-1]
             curr_rsi = rsi.iloc[-1]
