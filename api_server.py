@@ -641,8 +641,11 @@ def _at_fields(data: dict) -> dict:
 def _at_create(table: str, data: dict) -> dict:
     """Create a record in Airtable."""
     url = f"{AIRTABLE_API}/{AIRTABLE_BASE_ID}/{table}"
+    fields = _at_fields(data)
     r = requests.post(url, headers=_at_headers(),
-                      json={"fields": _at_fields(data)}, timeout=10)
+                      json={"fields": fields}, timeout=10)
+    if not r.ok:
+        logger.error(f"Airtable create error: {r.status_code} {r.text} | fields sent: {list(fields.keys())}")
     r.raise_for_status()
     rec = r.json()
     return {"$id": rec["id"], **rec.get("fields", {})}
@@ -779,7 +782,7 @@ def eod_review():
         t1           = float(trade["target1"])
         t2           = float(trade["target2"])
         qty          = int(trade.get("quantity", 1))
-        partial_done = trade.get("partial_exit_done", False)
+        partial_done = trade.get("partial_exit_done", False) in (True, "true")
 
         df = _yf_download(ticker, period="5d")
         if df is None or df.empty:
