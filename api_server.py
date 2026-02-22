@@ -460,7 +460,7 @@ def _scanner_worker():
     Guarantees only ONE yfinance scan runs at any given time → no OOM.
     Job values: "nifty50" or "midcap"
     """
-    global _SCAN_CACHE, _MIDCAP_CACHE
+    # Using .update() on shared dicts — no global reassignment needed
     logger.info("Scanner worker thread started — waiting for jobs...")
 
     while True:
@@ -479,13 +479,13 @@ def _scanner_worker():
                 )
                 ts = datetime.utcnow().isoformat() + "Z"
                 with _SCAN_LOCK:
-                    _SCAN_CACHE = {
+                    _SCAN_CACHE.update({
                         "results":      results,
                         "status":       "ready",
                         "last_updated": ts,
                         "count":        len(results),
                         "scanned":      len(NIFTY50_TICKERS),
-                    }
+                    })
                 logger.info(f"Scanner worker: Nifty50 done — {len(results)} setups.")
                 _save_disk_cache(_CACHE_FILE, _SCAN_CACHE)
 
@@ -498,13 +498,13 @@ def _scanner_worker():
                 )
                 ts = datetime.utcnow().isoformat() + "Z"
                 with _SCAN_LOCK:
-                    _MIDCAP_CACHE = {
+                    _MIDCAP_CACHE.update({
                         "results":      results,
                         "status":       "ready",
                         "last_updated": ts,
                         "count":        len(results),
                         "scanned":      len(NIFTY_MIDCAP150_TICKERS),
-                    }
+                    })
                 logger.info(f"Scanner worker: Midcap150 done — {len(results)} setups.")
                 _save_disk_cache(_MIDCAP_CACHE_FILE, _MIDCAP_CACHE)
 
@@ -537,7 +537,7 @@ def _nifty50_scheduler():
 
 def _market_regime_worker():
     """Fetches market regime in background every 5 min. Starts after 90s delay."""
-    global _MARKET_CACHE
+    # .update() used — no global reassignment needed
     _time.sleep(90)  # let nifty50 first scan start first
     while True:
         try:
@@ -545,25 +545,35 @@ def _market_regime_worker():
             data = engine.get_market_regime_public()
             ts = datetime.utcnow().isoformat() + "Z"
             with _SCAN_LOCK:
-                _MARKET_CACHE = {"data": data, "status": "ready", "last_updated": ts}
+                _MARKET_CACHE.update({"data": data, "status": "ready", "last_updated": ts})
             logger.info("Market regime: done.")
         except Exception as e:
             logger.error(f"Market regime error: {e}")
         _time.sleep(SCAN_INTERVAL_SECONDS)
 
 
-# ── Launch threads ────────────────────────────────────────────────────────────
-# 1. Single scanner worker — processes all scan jobs sequentially
-threading.Thread(target=_scanner_worker,       daemon=True, name="scanner-worker").start()
-# 2. Scheduler — enqueues nifty50 scan every 5 min
-threading.Thread(target=_nifty50_scheduler,    daemon=True, name="nifty50-scheduler").start()
-# 3. Market regime — separate lightweight thread
-threading.Thread(target=_market_regime_worker, daemon=True, name="market-regime").start()
+# ── Thread launcher with auto-restart ────────────────────────────────────────
+def _watched_thread(target, name):
+    """Wraps a thread target to auto-restart if it crashes."""
+    def wrapper():
+        while True:
+            try:
+                logger.info(f"Thread '{name}' starting...")
+                target()
+            except Exception as e:
+                logger.error(f"Thread '{name}' crashed: {e} — restarting in 5s")
+                _time.sleep(5)
+    t = threading.Thread(target=wrapper, daemon=True, name=name)
+    t.start()
+    return t
+
+_watched_thread(_scanner_worker,       "scanner-worker")
+_watched_thread(_nifty50_scheduler,    "nifty50-scheduler")
+_watched_thread(_market_regime_worker, "market-regime")
+
 # Enqueue first nifty50 scan immediately
 _SCAN_QUEUE.put("nifty50")
-logger.info("Scanner worker + scheduler + market threads launched. First nifty50 scan enqueued.")
-
-# Keep-alive handled by Cloudflare Worker cron.
+logger.info("All background threads launched. First nifty50 scan enqueued.")
 logger.info("Keep-alive: handled by Cloudflare Worker cron")
 
 
