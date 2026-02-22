@@ -597,6 +597,63 @@ _start_thread(_sectors_worker,       "sectors-worker")
 _SCAN_QUEUE.put("nifty50")
 logger.info("Background threads started. Nifty50 scan enqueued.")
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  APPWRITE DATABASE LAYER
+#  REST API only — no SDK needed, requests already in requirements.txt
+# ═══════════════════════════════════════════════════════════════════════════
+import uuid as _uuid
+
+APPWRITE_ENDPOINT   = "https://cloud.appwrite.io/v1"
+APPWRITE_PROJECT_ID = os.environ.get("APPWRITE_PROJECT_ID", "699b22a1003915cbba9c")
+APPWRITE_API_KEY    = os.environ.get("APPWRITE_API_KEY", "")
+APPWRITE_DB_ID      = os.environ.get("APPWRITE_DB_ID", "699b22c30007056c3be0")
+
+COL_ACTIVE   = "active_trades"
+COL_LOG      = "trade_log"
+COL_CLOSED   = "closed_trades"
+COL_REVIEWS  = "eod_reviews"
+
+def _aw_headers():
+    return {
+        "Content-Type":       "application/json",
+        "X-Appwrite-Project": APPWRITE_PROJECT_ID,
+        "X-Appwrite-Key":     APPWRITE_API_KEY,
+    }
+
+def _aw_create(collection: str, data: dict) -> dict:
+    doc_id = str(_uuid.uuid4()).replace("-", "")[:20]
+    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents"
+    r = requests.post(url, headers=_aw_headers(),
+                      json={"documentId": doc_id, "data": _safe_convert(data)}, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+def _aw_list(collection: str, queries: list = None) -> list:
+    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents"
+    params = [("queries[]", q) for q in (queries or [])]
+    r = requests.get(url, headers=_aw_headers(), params=params, timeout=10)
+    r.raise_for_status()
+    return r.json().get("documents", [])
+
+def _aw_get(collection: str, doc_id: str) -> dict:
+    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents/{doc_id}"
+    r = requests.get(url, headers=_aw_headers(), timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+def _aw_update(collection: str, doc_id: str, data: dict) -> dict:
+    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents/{doc_id}"
+    r = requests.patch(url, headers=_aw_headers(),
+                       json={"data": _safe_convert(data)}, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+def _aw_delete(collection: str, doc_id: str):
+    url = f"{APPWRITE_ENDPOINT}/databases/{APPWRITE_DB_ID}/collections/{collection}/documents/{doc_id}"
+    r = requests.delete(url, headers=_aw_headers(), timeout=10)
+    r.raise_for_status()
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  UTILITY
 # ═══════════════════════════════════════════════════════════════════════════
@@ -617,6 +674,262 @@ def _resolve_tickers(body: dict) -> list:
 # ═══════════════════════════════════════════════════════════════════════════
 #  ROUTES
 # ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TRADE MANAGEMENT ROUTES
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/trades/active", methods=["GET"])
+def get_active_trades():
+    try:
+        docs = _aw_list(COL_ACTIVE, queries=['orderDesc("entry_date")'])
+        return safe_jsonify({"trades": docs, "count": len(docs)})
+    except Exception as e:
+        logger.exception("get_active_trades error")
+        return _err(str(e))
+
+
+@app.route("/api/trades/add", methods=["POST", "OPTIONS"])
+def add_trade():
+    if request.method == "OPTIONS": return safe_jsonify({}), 200
+    try:
+        b = request.get_json(silent=True) or {}
+        entry = float(b["entry_price"])
+        sl    = float(b["stop_loss"])
+        t1    = float(b["target1"])
+        t2    = float(b["target2"])
+        risk  = entry - sl
+        rr    = round((t2 - entry) / risk, 2) if risk > 0 else 0
+        trade = {
+            "ticker":            b["ticker"],
+            "entry_price":       entry,
+            "stop_loss":         sl,
+            "original_sl":       sl,
+            "target1":           t1,
+            "target2":           t2,
+            "setup_type":        b.get("setup_type", ""),
+            "sector":            b.get("sector", ""),
+            "universe":          b.get("universe", "nifty50"),
+            "quantity":          int(b.get("quantity", 1)),
+            "entry_date":        datetime.utcnow().isoformat() + "Z",
+            "status":            "open",
+            "partial_exit_done": False,
+            "risk_reward":       rr,
+            "notes":             b.get("notes", ""),
+        }
+        doc = _aw_create(COL_ACTIVE, trade)
+        logger.info(f"Trade added: {b['ticker']} entry={entry}")
+        return safe_jsonify({"success": True, "trade": doc})
+    except Exception as e:
+        logger.exception("add_trade error")
+        return _err(str(e))
+
+
+@app.route("/api/trades/review", methods=["POST", "OPTIONS"])
+def eod_review():
+    """EOD engine review — fetch current price, generate recommendations."""
+    if request.method == "OPTIONS": return safe_jsonify({}), 200
+    try:
+        b        = request.get_json(silent=True) or {}
+        trade_id = b.get("trade_id")
+        if not trade_id: return _err("Missing trade_id", 400)
+
+        trade        = _aw_get(COL_ACTIVE, trade_id)
+        ticker       = trade["ticker"]
+        entry        = float(trade["entry_price"])
+        sl           = float(trade["stop_loss"])
+        t1           = float(trade["target1"])
+        t2           = float(trade["target2"])
+        qty          = int(trade.get("quantity", 1))
+        partial_done = trade.get("partial_exit_done", False)
+
+        df = _yf_download(ticker, period="5d")
+        if df is None or df.empty:
+            return _err(f"Could not fetch price for {ticker}")
+        current = float(df["Close"].iloc[-1])
+
+        risk   = entry - sl
+        gain   = current - entry
+        r_mult = round(gain / risk, 2) if risk > 0 else 0
+        pnl_pct = round((current - entry) / entry * 100, 2)
+
+        recs   = []
+        action = "HOLD"
+
+        if current <= sl:
+            action = "EXIT"
+            recs.append({"type":"FULL_EXIT","urgency":"HIGH",
+                "message":f"⛔ Stop loss hit. Exit immediately. Loss: {pnl_pct}%",
+                "suggested_price": current})
+        elif current >= t2:
+            action = "EXIT"
+            recs.append({"type":"FULL_EXIT","urgency":"HIGH",
+                "message":f"🎯 Target 2 hit! Book full profit. Gain: {pnl_pct}%",
+                "suggested_price": current})
+        else:
+            if current >= t1 and not partial_done:
+                action = "PARTIAL_EXIT"
+                recs.append({"type":"PARTIAL_EXIT","urgency":"MEDIUM",
+                    "message":f"🎯 Target 1 hit. Book 50% ({qty//2} qty) at {current:.2f}. Hold rest to {t2:.2f}",
+                    "suggested_price": current, "exit_qty": qty // 2})
+            if r_mult >= 1.0:
+                new_sl = round(entry + (0.5 * abs(risk)), 2)
+                if new_sl > sl:
+                    recs.append({"type":"TRAIL_SL","urgency":"MEDIUM",
+                        "message":f"📈 Trail SL to {new_sl:.2f} (entry+0.5R). Position at {r_mult}R",
+                        "suggested_sl": new_sl})
+                    if action == "HOLD": action = "TRAIL_SL"
+            if 0.5 <= r_mult < 1.5 and not partial_done:
+                recs.append({"type":"PYRAMID","urgency":"LOW",
+                    "message":f"📊 Trend intact at {r_mult}R. Consider adding {max(1,qty//2)} qty",
+                    "add_qty": max(1, qty//2), "suggested_price": current})
+            if current >= t1 and partial_done:
+                ext = round(t2 + (t2 - t1), 2)
+                recs.append({"type":"REVISE_TARGET","urgency":"LOW",
+                    "message":f"🚀 Momentum strong. Consider extending target2 to {ext:.2f}",
+                    "suggested_target2": ext})
+            if len(df) >= 20:
+                ema20 = float(df["Close"].ewm(span=20).mean().iloc[-1])
+                if current < ema20 and gain < 0:
+                    recs.append({"type":"EXIT_SIGNAL","urgency":"HIGH",
+                        "message":f"⚠️ Below 20 EMA ({ema20:.2f}) with loss. Setup may be broken.",
+                        "suggested_price": current})
+                    action = "EXIT_SIGNAL"
+            if not recs:
+                recs.append({"type":"HOLD","urgency":"LOW",
+                    "message":f"✅ Setup intact. {pnl_pct}% ({r_mult}R). Hold."})
+
+        _aw_create(COL_REVIEWS, {
+            "trade_id": trade_id, "ticker": ticker,
+            "review_date": datetime.utcnow().isoformat() + "Z",
+            "current_price": current, "pnl_pct": pnl_pct,
+            "r_multiple": r_mult, "action": action,
+            "recommendations": json.dumps(recs),
+        })
+
+        return safe_jsonify({"trade_id": trade_id, "ticker": ticker,
+            "current_price": current, "pnl_pct": pnl_pct,
+            "r_multiple": r_mult, "action": action, "recommendations": recs})
+
+    except Exception as e:
+        logger.exception("eod_review error")
+        return _err(str(e))
+
+
+@app.route("/api/trades/action", methods=["POST", "OPTIONS"])
+def record_action():
+    """Record action taken on a trade. Updates Appwrite. Closes trade on EXIT."""
+    if request.method == "OPTIONS": return safe_jsonify({}), 200
+    try:
+        b        = request.get_json(silent=True) or {}
+        trade_id = b.get("trade_id")
+        action   = b.get("action")
+        if not trade_id or not action: return _err("Missing trade_id or action", 400)
+
+        trade = _aw_get(COL_ACTIVE, trade_id)
+        log_entry = {
+            "trade_id": trade_id, "ticker": trade["ticker"],
+            "action": action, "action_date": datetime.utcnow().isoformat() + "Z",
+            "price": float(b.get("price", 0)), "quantity": int(b.get("quantity", 0)),
+            "old_sl": float(trade.get("stop_loss", 0)),
+            "new_sl": float(b.get("new_sl", trade.get("stop_loss", 0))),
+            "notes": b.get("notes", ""),
+        }
+        _aw_create(COL_LOG, log_entry)
+
+        if action == "TRAIL_SL":
+            _aw_update(COL_ACTIVE, trade_id, {"stop_loss": float(b["new_sl"])})
+            return safe_jsonify({"success": True, "message": f"SL updated to {b['new_sl']}"})
+
+        elif action == "REVISE_TARGET":
+            _aw_update(COL_ACTIVE, trade_id, {"target2": float(b["new_target2"])})
+            return safe_jsonify({"success": True, "message": f"Target updated to {b['new_target2']}"})
+
+        elif action == "PARTIAL_EXIT":
+            exit_qty   = int(b.get("quantity", trade["quantity"] // 2))
+            exit_price = float(b.get("price", 0))
+            remaining  = trade["quantity"] - exit_qty
+            pnl        = round((exit_price - float(trade["entry_price"])) * exit_qty, 2)
+            _aw_update(COL_ACTIVE, trade_id, {
+                "quantity": remaining, "partial_exit_done": True,
+                "partial_exit_price": exit_price, "partial_exit_qty": exit_qty,
+                "partial_pnl": pnl,
+            })
+            return safe_jsonify({"success": True, "message": f"Partial exit. PnL: ₹{pnl}", "remaining_qty": remaining})
+
+        elif action in ("FULL_EXIT", "EXIT"):
+            exit_price  = float(b.get("price", 0))
+            qty         = int(trade.get("quantity", 1))
+            entry_price = float(trade["entry_price"])
+            pnl         = round((exit_price - entry_price) * qty, 2)
+            pnl_pct     = round((exit_price - entry_price) / entry_price * 100, 2)
+            total_pnl   = round(pnl + float(trade.get("partial_pnl", 0)), 2)
+            outcome     = "WIN" if total_pnl > 0 else ("LOSS" if total_pnl < 0 else "BREAKEVEN")
+            entry_dt    = datetime.fromisoformat(trade["entry_date"].replace("Z",""))
+            days_held   = (datetime.utcnow() - entry_dt).days
+
+            closed = {k: v for k, v in trade.items() if not k.startswith("$")}
+            closed.update({"exit_price": exit_price,
+                "exit_date": datetime.utcnow().isoformat() + "Z",
+                "exit_pnl": pnl, "total_pnl": total_pnl,
+                "pnl_pct": pnl_pct, "outcome": outcome, "days_held": days_held})
+            _aw_create(COL_CLOSED, closed)
+            _aw_delete(COL_ACTIVE, trade_id)
+            logger.info(f"Trade closed: {trade['ticker']} {outcome} PnL=₹{total_pnl}")
+            return safe_jsonify({"success": True, "outcome": outcome, "total_pnl": total_pnl})
+
+        elif action == "PYRAMID":
+            new_qty = trade["quantity"] + int(b.get("quantity", 1))
+            _aw_update(COL_ACTIVE, trade_id, {"quantity": new_qty})
+            return safe_jsonify({"success": True, "message": f"Position increased to {new_qty}"})
+
+        return _err(f"Unknown action: {action}", 400)
+
+    except Exception as e:
+        logger.exception("record_action error")
+        return _err(str(e))
+
+
+@app.route("/api/trades/performance", methods=["GET"])
+def trade_performance():
+    try:
+        trades = _aw_list(COL_CLOSED, queries=['orderDesc("exit_date")'])
+        if not trades:
+            return safe_jsonify({"message": "No closed trades yet.", "stats": {}, "recent_trades": []})
+
+        total    = len(trades)
+        wins     = [t for t in trades if t.get("outcome") == "WIN"]
+        losses   = [t for t in trades if t.get("outcome") == "LOSS"]
+        win_rate = round(len(wins) / total * 100, 1)
+        total_pnl = round(sum(t.get("total_pnl", 0) for t in trades), 2)
+        avg_win  = round(sum(t.get("total_pnl", 0) for t in wins) / len(wins), 2) if wins else 0
+        avg_loss = round(sum(t.get("total_pnl", 0) for t in losses) / len(losses), 2) if losses else 0
+        expect   = round((win_rate/100 * avg_win) + ((1-win_rate/100) * avg_loss), 2)
+        avg_days = round(sum(t.get("days_held", 0) for t in trades) / total, 1)
+
+        setup_stats = {}
+        for t in trades:
+            s = t.get("setup_type", "Unknown")
+            if s not in setup_stats:
+                setup_stats[s] = {"total": 0, "wins": 0, "pnl": 0}
+            setup_stats[s]["total"] += 1
+            if t.get("outcome") == "WIN": setup_stats[s]["wins"] += 1
+            setup_stats[s]["pnl"] += t.get("total_pnl", 0)
+        for s in setup_stats:
+            setup_stats[s]["win_rate"] = round(setup_stats[s]["wins"] / setup_stats[s]["total"] * 100, 1)
+            setup_stats[s]["pnl"] = round(setup_stats[s]["pnl"], 2)
+
+        return safe_jsonify({
+            "stats": {"total_trades": total, "win_rate_pct": win_rate,
+                "total_pnl": total_pnl, "avg_win": avg_win, "avg_loss": avg_loss,
+                "expectancy": expect, "avg_days_held": avg_days},
+            "by_setup": setup_stats,
+            "recent_trades": trades[:20],
+        })
+    except Exception as e:
+        logger.exception("trade_performance error")
+        return _err(str(e))
+
 
 # ── Health check ────────────────────────────────────────────────────────────
 @app.route("/", methods=["GET", "HEAD"])
