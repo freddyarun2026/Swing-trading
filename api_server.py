@@ -405,51 +405,52 @@ TICKER_MARKET_CAP_MIDCAP = {t: "midcap" for t in NIFTY_MIDCAP150_TICKERS}
 # ═══════════════════════════════════════════════════════════════════════════
 #  CACHE LAYER — Disk-based, process-safe
 #
-#  ROOT CAUSE of previous failures:
-#    gunicorn sync worker FORKS a child process to serve HTTP requests.
-#    Background threads run in the PARENT process.
-#    Parent and child have SEPARATE memory — child never sees thread updates.
-#    This is proven by os.fork() tests: child always reads stale cache.
+#  ROOT CAUSE of all previous failures:
+#    gunicorn sync worker FORKS a child process to serve HTTP.
+#    In-memory dicts updated by background threads are INVISIBLE to the fork.
+#    Trigger files had a race condition: "if not exists" prevents re-queuing
+#    when the file already exists from a previous request that stalled.
 #
-#  PERMANENT FIX:
-#    Disk is the ONLY shared state between all processes on the same machine.
-#    Background thread writes scan results to disk every 5 min.
-#    HTTP route reads from disk on every request — always sees latest results.
-#    No inter-process memory sharing required. Works with any gunicorn config.
+#  PERMANENT ARCHITECTURE:
+#    1. Background thread (parent) runs scans, writes JSON results to DISK.
+#    2. HTTP routes (child) read results from DISK — works across fork.
+#    3. Midcap requests: HTTP child writes trigger file to disk.
+#       Scanner worker (parent) polls trigger file every 10s → enqueues job.
+#    4. Trigger file is cleared ONLY after scan completes successfully.
+#    5. Queue used inside parent process — single worker, no OOM.
+#    6. Stale trigger files cleaned on startup.
 # ═══════════════════════════════════════════════════════════════════════════
 
 import time as _time
 import queue as _queue
 
-_SCAN_LOCK  = threading.Lock()   # protects in-flight scan flag only
-_SCAN_QUEUE = _queue.Queue()     # job queue: "nifty50" or "midcap"
 SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))
 
-# ── Disk cache paths ──────────────────────────────────────────────────────────
-_CACHE_DIR       = os.path.dirname(os.path.abspath(__file__))
-_CACHE_FILE      = os.path.join(_CACHE_DIR, "swingbull_scan_cache.json")
-_MIDCAP_CACHE_FILE = os.path.join(_CACHE_DIR, "swingbull_midcap_cache.json")
+_BASE_DIR            = os.path.dirname(os.path.abspath(__file__))
+_CACHE_FILE          = os.path.join(_BASE_DIR, "swingbull_scan_cache.json")
+_MIDCAP_CACHE_FILE   = os.path.join(_BASE_DIR, "swingbull_midcap_cache.json")
+_MIDCAP_TRIGGER_FILE = os.path.join(_BASE_DIR, "scan_midcap.trigger")
+_SCAN_LOCK           = threading.Lock()
+_SCAN_QUEUE          = _queue.Queue()
+_ACTIVE_JOB          = None   # name of currently running scan job
 
 def _read_cache(filepath: str) -> dict:
-    """Read cache from disk. Always fresh — written by background thread."""
+    """Read scan results from disk. Returns warming dict if missing/stale."""
     try:
         if os.path.exists(filepath):
             with open(filepath, "r") as f:
                 data = json.load(f)
-            # Accept disk cache up to 20 minutes old
-            age = _time.time() - data.get("_saved_at", 0)
-            if age < 1200:
+            if _time.time() - data.get("_saved_at", 0) < 1200:
                 return data
     except Exception as e:
         logger.warning(f"Cache read error {filepath}: {e}")
     return {"results": [], "status": "warming", "last_updated": None, "count": 0, "scanned": 0}
 
 def _write_cache(filepath: str, data: dict):
-    """Write cache to disk atomically."""
+    """Write scan results atomically — no partial reads possible."""
     try:
         to_save = _safe_convert(dict(data))
         to_save["_saved_at"] = _time.time()
-        # Write to temp file then rename — atomic on Linux, no partial reads
         tmp = filepath + ".tmp"
         with open(tmp, "w") as f:
             json.dump(to_save, f, allow_nan=False)
@@ -458,68 +459,81 @@ def _write_cache(filepath: str, data: dict):
     except Exception as e:
         logger.warning(f"Cache write error {filepath}: {e}")
 
-# ── Market cache — in-memory only (lightweight, no scan) ─────────────────────
 _MARKET_CACHE: dict = {"data": None, "status": "warming", "last_updated": None}
 
-
-# ── Single scanner worker — one job at a time, no OOM ────────────────────────
 def _scanner_worker():
-    """
-    Processes scan jobs from queue ONE AT A TIME.
-    Writes results to DISK — readable by HTTP worker process regardless of fork.
-    """
+    """Single worker — processes scan jobs one at a time. No OOM."""
+    global _ACTIVE_JOB
     logger.info("Scanner worker started")
     while True:
         try:
-            job = _SCAN_QUEUE.get(timeout=60)
+            job = _SCAN_QUEUE.get(timeout=10)
+            _ACTIVE_JOB = job
+            try:
+                if job == "nifty50":
+                    logger.info("Scanner: running Nifty50...")
+                    results = engine.scan_stocks_public(
+                        tickers=NIFTY50_TICKERS,
+                        sector_map=TICKER_SECTOR,
+                        market_cap_map=TICKER_MARKET_CAP,
+                    )
+                    _write_cache(_CACHE_FILE, {
+                        "results": results, "status": "ready",
+                        "last_updated": datetime.utcnow().isoformat() + "Z",
+                        "count": len(results), "scanned": len(NIFTY50_TICKERS),
+                    })
+                    logger.info(f"Scanner: Nifty50 done — {len(results)} setups")
+
+                elif job == "midcap":
+                    logger.info("Scanner: running Midcap150...")
+                    results = engine.scan_stocks_public(
+                        tickers=NIFTY_MIDCAP150_TICKERS,
+                        sector_map=TICKER_SECTOR_MIDCAP,
+                        market_cap_map=TICKER_MARKET_CAP_MIDCAP,
+                    )
+                    _write_cache(_MIDCAP_CACHE_FILE, {
+                        "results": results, "status": "ready",
+                        "last_updated": datetime.utcnow().isoformat() + "Z",
+                        "count": len(results), "scanned": len(NIFTY_MIDCAP150_TICKERS),
+                    })
+                    logger.info(f"Scanner: Midcap150 done — {len(results)} setups")
+                    # Clear trigger AFTER successful write
+                    try:
+                        os.remove(_MIDCAP_TRIGGER_FILE)
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                logger.error(f"Scanner error (job={job}): {e}")
+            finally:
+                _ACTIVE_JOB = None
+                _SCAN_QUEUE.task_done()
+
         except _queue.Empty:
-            continue
-        try:
-            if job == "nifty50":
-                logger.info("Scanner: running Nifty50...")
-                results = engine.scan_stocks_public(
-                    tickers=NIFTY50_TICKERS,
-                    sector_map=TICKER_SECTOR,
-                    market_cap_map=TICKER_MARKET_CAP,
-                )
-                _write_cache(_CACHE_FILE, {
-                    "results": results, "status": "ready",
-                    "last_updated": datetime.utcnow().isoformat() + "Z",
-                    "count": len(results), "scanned": len(NIFTY50_TICKERS),
-                })
-                logger.info(f"Scanner: Nifty50 done — {len(results)} setups")
-
-            elif job == "midcap":
-                logger.info("Scanner: running Midcap150...")
-                results = engine.scan_stocks_public(
-                    tickers=NIFTY_MIDCAP150_TICKERS,
-                    sector_map=TICKER_SECTOR_MIDCAP,
-                    market_cap_map=TICKER_MARKET_CAP_MIDCAP,
-                )
-                _write_cache(_MIDCAP_CACHE_FILE, {
-                    "results": results, "status": "ready",
-                    "last_updated": datetime.utcnow().isoformat() + "Z",
-                    "count": len(results), "scanned": len(NIFTY_MIDCAP150_TICKERS),
-                })
-                logger.info(f"Scanner: Midcap150 done — {len(results)} setups")
-
-        except Exception as e:
-            logger.error(f"Scanner error (job={job}): {e}")
-        finally:
-            _SCAN_QUEUE.task_done()
+            # Poll trigger file — written by HTTP child process
+            if os.path.exists(_MIDCAP_TRIGGER_FILE):
+                if "midcap" not in list(_SCAN_QUEUE.queue) and _ACTIVE_JOB != "midcap":
+                    _SCAN_QUEUE.put("midcap")
+                    logger.info("Midcap trigger detected — scan enqueued")
 
 
 def _nifty50_scheduler():
-    """Enqueues nifty50 scan every 5 min. Skips if queue has pending jobs."""
+    """Enqueues nifty50 every 5 min. Never runs if midcap is pending."""
     while True:
         _time.sleep(SCAN_INTERVAL_SECONDS)
-        if _SCAN_QUEUE.empty():
+        midcap_active  = _ACTIVE_JOB == "midcap"
+        midcap_queued  = "midcap" in list(_SCAN_QUEUE.queue)
+        midcap_trigger = os.path.exists(_MIDCAP_TRIGGER_FILE)
+        nifty_queued   = "nifty50" in list(_SCAN_QUEUE.queue)
+        if not midcap_active and not midcap_queued and not midcap_trigger and not nifty_queued:
             _SCAN_QUEUE.put("nifty50")
             logger.info("Scheduler: nifty50 enqueued")
+        elif midcap_active or midcap_queued or midcap_trigger:
+            logger.info("Scheduler: skipping nifty50 — midcap pending")
 
 
 def _market_regime_worker():
-    """Fetches market regime every 5 min. In-memory only — lightweight."""
+    """Fetches market regime every 5 min. In-memory — parent process only."""
     global _MARKET_CACHE
     _time.sleep(90)
     while True:
@@ -538,7 +552,6 @@ def _market_regime_worker():
 
 
 def _start_thread(target, name):
-    """Start a daemon thread that auto-restarts on crash."""
     def wrapper():
         while True:
             try:
@@ -548,11 +561,18 @@ def _start_thread(target, name):
                 _time.sleep(5)
     threading.Thread(target=wrapper, daemon=True, name=name).start()
 
-_start_thread(_scanner_worker,    "scanner-worker")
-_start_thread(_nifty50_scheduler, "nifty50-scheduler")
+# Clean up any stale trigger files from previous deploys
+try:
+    if os.path.exists(_MIDCAP_TRIGGER_FILE):
+        os.remove(_MIDCAP_TRIGGER_FILE)
+        logger.info("Cleared stale midcap trigger from previous session")
+except Exception:
+    pass
+
+_start_thread(_scanner_worker,       "scanner-worker")
+_start_thread(_nifty50_scheduler,    "nifty50-scheduler")
 _start_thread(_market_regime_worker, "market-regime")
 
-# Enqueue first nifty50 scan immediately on startup
 _SCAN_QUEUE.put("nifty50")
 logger.info("Background threads started. Nifty50 scan enqueued.")
 
@@ -684,13 +704,10 @@ def scan_midcap():
             })
 
         # Enqueue midcap scan if not already queued
-        queue_items = list(_SCAN_QUEUE.queue)
-        if "midcap" not in queue_items:
-            _SCAN_QUEUE.put("midcap")
-            logger.info("Midcap scan enqueued")
+        # Write trigger file — readable by scanner worker in parent process
+        _request_scan(_MIDCAP_TRIGGER_FILE)
 
-        qsize = _SCAN_QUEUE.qsize()
-        wait_msg = "Midcap scan running — results ready in ~2 minutes." if qsize <= 1                    else f"Midcap scan queued (position {qsize}) — results ready soon."
+        wait_msg = "Midcap scan running — results ready in ~2 minutes."
 
         return safe_jsonify({
             "status":   "warming",
