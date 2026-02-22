@@ -2507,6 +2507,16 @@ class SetupClassifier:
             }
 
         except Exception as e:
+            # Return None for data errors so caller can skip cleanly
+            # Return error dict for real classification failures
+            err_str = str(e).lower()
+            is_data_error = any(k in err_str for k in (
+                "insufficient data", "invalid close", "indicator computation",
+                "nonetype", "iloc", "index", "empty"
+            ))
+            if is_data_error:
+                logger.debug(f"Skipping {ticker} (data issue): {e}")
+                return None
             logger.error(f"Classification error for {ticker}: {e}")
             return {
                 'setup_type': SetupType.UNKNOWN,
@@ -3529,20 +3539,34 @@ class SwingBullEngine:
                 time.sleep(random.uniform(0.3, 0.8))
             try:
                 df = _yf_download(ticker, period="3mo")
-                if df.empty:
+
+                # Skip tickers with insufficient data — need 60+ rows for all indicators
+                if df is None or df.empty or len(df) < 60:
+                    logger.debug(f"Skipping {ticker}: only {len(df) if df is not None else 0} rows")
                     continue
+
+                # Ensure Close column is a clean Series
+                close_series = df['Close'].squeeze()
+                if not isinstance(close_series, pd.Series) or len(close_series) < 60:
+                    logger.debug(f"Skipping {ticker}: invalid close series")
+                    continue
+
                 sector = (sector_map or {}).get(ticker, "")
                 cap_cat = (market_cap_map or {}).get(ticker, "midcap")
                 classification = SetupClassifier.classify_setup(
                     df, ticker, sector, cap_cat, 999, 1.0, sector_data
                 )
 
+                # Skip if classification failed
+                if classification is None:
+                    continue
+
                 # V4: Check portfolio constraints
                 portfolio_check = PortfolioRiskEngine.check_portfolio_constraint(
                     sector, self._active_positions
                 )
 
-                entry_price = float(df['Close'].squeeze().iloc[-1])
+                entry_price = float(close_series.iloc[-1])
                 risk_data = RiskCalculator.calculate_risk_params(
                     df, classification['setup_type'], entry_price,
                     classification.get('gap_risk')
