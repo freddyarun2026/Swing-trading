@@ -687,35 +687,6 @@ def _at_delete(table: str, record_id: str):
     r = requests.delete(url, headers=_at_headers(), timeout=10)
     r.raise_for_status()
 
-def _at_ensure_tables():
-    """
-    Create Airtable tables if they don't exist.
-    Airtable Meta API — creates tables with a single text field.
-    Additional fields are created automatically when records are written.
-    """
-    if not AIRTABLE_TOKEN:
-        logger.warning("AIRTABLE_TOKEN not set — trade storage disabled")
-        return
-    try:
-        url = f"https://api.airtable.com/v0/meta/bases/{AIRTABLE_BASE_ID}/tables"
-        r = requests.get(url, headers=_at_headers(), timeout=10)
-        r.raise_for_status()
-        existing = {t["name"] for t in r.json().get("tables", [])}
-        needed   = [TBL_ACTIVE, TBL_LOG, TBL_CLOSED, TBL_REVIEWS]
-        for tbl in needed:
-            if tbl not in existing:
-                requests.post(url, headers=_at_headers(), timeout=10, json={
-                    "name": tbl,
-                    "fields": [{"name": "ticker", "type": "singleLineText"}]
-                })
-                logger.info(f"Airtable: created table {tbl}")
-            else:
-                logger.info(f"Airtable: table {tbl} exists ✅")
-    except Exception as e:
-        logger.warning(f"Airtable table check failed: {e}")
-
-# Create tables on startup
-_at_ensure_tables()
 
 
 
