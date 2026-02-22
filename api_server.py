@@ -32,6 +32,7 @@ V4 CHANGES:
 import os
 import logging
 import json
+import requests
 import numpy as np
 import threading
 from datetime import datetime
@@ -149,7 +150,7 @@ _NSE_URLS = {
 
 def _fetch_nse_tickers(index: str) -> list:
     """Fetch live official ticker list from NSE. Falls back to hardcoded list on failure."""
-    import requests, csv, io
+    import csv, io
     url = _NSE_URLS.get(index)
     if not url:
         return []
