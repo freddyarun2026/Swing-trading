@@ -430,6 +430,7 @@ _BASE_DIR            = os.path.dirname(os.path.abspath(__file__))
 _CACHE_FILE          = os.path.join(_BASE_DIR, "swingbull_scan_cache.json")
 _MIDCAP_CACHE_FILE   = os.path.join(_BASE_DIR, "swingbull_midcap_cache.json")
 _MIDCAP_TRIGGER_FILE = os.path.join(_BASE_DIR, "scan_midcap.trigger")
+_SECTORS_CACHE_FILE  = os.path.join(_BASE_DIR, "swingbull_sectors_cache.json")
 _SCAN_LOCK           = threading.Lock()
 _SCAN_QUEUE          = _queue.Queue()
 _ACTIVE_JOB          = None   # name of currently running scan job
@@ -572,6 +573,7 @@ except Exception:
 _start_thread(_scanner_worker,       "scanner-worker")
 _start_thread(_nifty50_scheduler,    "nifty50-scheduler")
 _start_thread(_market_regime_worker, "market-regime")
+_start_thread(_sectors_worker,       "sectors-worker")
 
 _SCAN_QUEUE.put("nifty50")
 logger.info("Background threads started. Nifty50 scan enqueued.")
@@ -781,11 +783,20 @@ def analyse():
 # ── Sectors ─────────────────────────────────────────────────────────────────
 @app.route("/api/sectors", methods=["GET"])
 def sectors():
-    """Returns sector RS rankings and concentration index."""
+    """Returns sector RS rankings from disk cache — never blocks."""
     try:
-        data = SectorLeadershipEngine.analyze_sectors()
+        cache = _read_cache(_SECTORS_CACHE_FILE)
+        if cache.get("status") == "ready" and cache.get("sectors"):
+            return safe_jsonify({
+                "sectors":      cache["sectors"],
+                "last_updated": cache.get("last_updated"),
+                "timestamp":    datetime.utcnow().isoformat() + "Z",
+                "dashboard_meta": DASHBOARD_META,
+            })
         return safe_jsonify({
-            "sectors": data,
+            "sectors":  {},
+            "status":   "warming",
+            "message":  "Sector data loading — ready in ~2 minutes.",
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "dashboard_meta": DASHBOARD_META,
         })
