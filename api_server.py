@@ -512,10 +512,9 @@ logger.info("Keep-alive: handled by Cloudflare Worker cron")
 
 
 # ── Launch background threads NOW — all ticker lists are defined above ────────
-threading.Thread(target=_run_background_scanner,        daemon=True).start()
-threading.Thread(target=_run_background_midcap_scanner, daemon=True).start()
-threading.Thread(target=_run_background_market,         daemon=True).start()
-logger.info("Background scanner + midcap + market threads launched")
+threading.Thread(target=_run_background_scanner, daemon=True).start()
+threading.Thread(target=_run_background_market,  daemon=True).start()
+logger.info("Background scanner + market threads launched (midcap: on-demand)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -623,25 +622,72 @@ def scan():
 
 
 # ── Midcap Scanner ───────────────────────────────────────────────────────────
+# On-demand: scans only when requested, caches for 15min, no background thread
+# This avoids OOM on Render free tier (512MB) which can't run 3 scan threads.
+_MIDCAP_SCAN_LOCK = threading.Lock()  # prevents concurrent midcap scans
+
 @app.route("/api/scan/midcap", methods=["GET", "POST", "OPTIONS"])
 def scan_midcap():
-    """Returns pre-computed Nifty Midcap 150 scan results from background cache."""
+    """On-demand Nifty Midcap 150 scan — runs once, caches 15min."""
     if request.method == "OPTIONS":
         return safe_jsonify({}), 200
     try:
+        # Return cache if fresh
         with _SCAN_LOCK:
             cache = dict(_MIDCAP_CACHE)
+
+        if cache["status"] == "ready":
+            return safe_jsonify({
+                "status":       "ready",
+                "results":      cache.get("results", []),
+                "count":        cache.get("count", 0),
+                "scanned":      cache.get("scanned", len(NIFTY_MIDCAP150_TICKERS)),
+                "last_updated": cache.get("last_updated"),
+                "timestamp":    datetime.utcnow().isoformat() + "Z",
+                "universe":     "midcap150",
+                "dashboard_meta": DASHBOARD_META,
+            })
+
+        # Cache miss — trigger background scan if not already running
+        if _MIDCAP_SCAN_LOCK.acquire(blocking=False):
+            def _do_midcap_scan():
+                global _MIDCAP_CACHE
+                try:
+                    logger.info("On-demand midcap scan: starting...")
+                    results = engine.scan_stocks_public(
+                        tickers        = NIFTY_MIDCAP150_TICKERS,
+                        sector_map     = TICKER_SECTOR_MIDCAP,
+                        market_cap_map = TICKER_MARKET_CAP_MIDCAP,
+                    )
+                    ts = datetime.utcnow().isoformat() + "Z"
+                    with _SCAN_LOCK:
+                        _MIDCAP_CACHE = {
+                            "results":      results,
+                            "status":       "ready",
+                            "last_updated": ts,
+                            "count":        len(results),
+                            "scanned":      len(NIFTY_MIDCAP150_TICKERS),
+                        }
+                    logger.info(f"On-demand midcap scan: done — {len(results)} results")
+                    _save_midcap_cache(_MIDCAP_CACHE)
+                except Exception as e:
+                    logger.error(f"On-demand midcap scan error: {e}")
+                finally:
+                    _MIDCAP_SCAN_LOCK.release()
+
+            threading.Thread(target=_do_midcap_scan, daemon=True).start()
+
+        # Return warming immediately — frontend retries in 10s
         return safe_jsonify({
-            "status":       cache["status"],
-            "message":      "Midcap scanner warming up..." if cache["status"] == "warming" else None,
-            "results":      cache.get("results", []),
-            "count":        cache.get("count", 0),
-            "scanned":      cache.get("scanned", len(NIFTY_MIDCAP150_TICKERS)),
-            "last_updated": cache.get("last_updated"),
-            "timestamp":    datetime.utcnow().isoformat() + "Z",
-            "universe":     "midcap150",
+            "status":   "warming",
+            "message":  "Midcap scan started — results ready in ~2 minutes. Auto-refreshing...",
+            "results":  [],
+            "count":    0,
+            "scanned":  len(NIFTY_MIDCAP150_TICKERS),
+            "universe": "midcap150",
             "dashboard_meta": DASHBOARD_META,
         })
+
     except Exception as e:
         logger.exception("scan/midcap error")
         return _err(str(e))
