@@ -703,9 +703,13 @@ def scan_midcap():
                 "dashboard_meta": DASHBOARD_META,
             })
 
-        # Enqueue midcap scan if not already queued
-        # Write trigger file — readable by scanner worker in parent process
-        _request_scan(_MIDCAP_TRIGGER_FILE)
+        # Write trigger file — scanner worker polls this every 10s
+        try:
+            with open(_MIDCAP_TRIGGER_FILE, "w") as f:
+                f.write(str(_time.time()))
+            logger.info("Midcap trigger written — scan will start within 10s")
+        except Exception as e:
+            logger.warning(f"Trigger write error: {e}")
 
         wait_msg = "Midcap scan running — results ready in ~2 minutes."
 
