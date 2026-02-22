@@ -431,6 +431,7 @@ _CACHE_FILE          = os.path.join(_BASE_DIR, "swingbull_scan_cache.json")
 _MIDCAP_CACHE_FILE   = os.path.join(_BASE_DIR, "swingbull_midcap_cache.json")
 _MIDCAP_TRIGGER_FILE = os.path.join(_BASE_DIR, "scan_midcap.trigger")
 _SECTORS_CACHE_FILE  = os.path.join(_BASE_DIR, "swingbull_sectors_cache.json")
+_MARKET_CACHE_FILE   = os.path.join(_BASE_DIR, "swingbull_market_cache.json")
 _SCAN_LOCK           = threading.Lock()
 _SCAN_QUEUE          = _queue.Queue()
 _ACTIVE_JOB          = None   # name of currently running scan job
@@ -541,11 +542,10 @@ def _market_regime_worker():
         try:
             logger.info("Market regime: fetching...")
             data = engine.get_market_regime_public()
-            with _SCAN_LOCK:
-                _MARKET_CACHE = {
-                    "data": data, "status": "ready",
-                    "last_updated": datetime.utcnow().isoformat() + "Z",
-                }
+            _write_cache(_MARKET_CACHE_FILE, {
+                "data": data, "status": "ready",
+                "last_updated": datetime.utcnow().isoformat() + "Z",
+            })
             logger.info("Market regime: done")
         except Exception as e:
             logger.error(f"Market regime error: {e}")
@@ -647,18 +647,19 @@ def market_regime():
     Responds instantly — no blocking yfinance calls on this request.
     """
     try:
-        with _SCAN_LOCK:
-            cache = dict(_MARKET_CACHE)
-
-        if cache["status"] == "warming" or cache["data"] is None:
+        cache = _read_cache(_MARKET_CACHE_FILE)
+        if cache.get("status") != "ready" or cache.get("data") is None:
             return safe_jsonify({
                 "status":  "warming",
-                "message": "Market data loading — refresh in 60 seconds.",
+                "message": "Market data loading — ready in ~2 minutes.",
                 "dashboard_meta": DASHBOARD_META,
             })
-
         data = dict(cache["data"])
-        data["last_updated"] = cache["last_updated"]
+        data["last_updated"] = cache.get("last_updated")
+        # Include sectors in market-regime response — frontend reads data.sectors
+        sectors_cache = _read_cache(_SECTORS_CACHE_FILE)
+        if sectors_cache.get("status") == "ready":
+            data["sectors"] = sectors_cache.get("sectors", {})
         return safe_jsonify(data)
 
     except Exception as e:
