@@ -783,24 +783,15 @@ def _at_setup_schema():
             existing = {f["name"] for f in tbl.get("fields", [])}
             fields_url = f"https://api.airtable.com/v0/meta/bases/{AIRTABLE_BASE_ID}/tables/{tbl_id}/fields"
 
-            # Rename default "Name" field to first field in schema (ticker)
-            name_field = next((f for f in tbl.get("fields", []) if f["name"] == "Name"), None)
-            if name_field and fields[0]["name"] not in existing:
-                requests.patch(
-                    f"{fields_url}/{name_field['id']}",
-                    headers=_at_headers(), timeout=10,
-                    json={"name": fields[0]["name"]}
-                )
-                existing.discard("Name")
-                existing.add(fields[0]["name"])
-                logger.info(f"Airtable: renamed Name→{fields[0]['name']} in {tbl_name}")
-
-            # Create missing fields
-            for field in fields[1:]:  # skip first (already renamed)
+            # Create ALL missing fields — skip fields that already exist
+            for field in fields:
                 if field["name"] not in existing:
-                    requests.post(fields_url, headers=_at_headers(),
+                    r2 = requests.post(fields_url, headers=_at_headers(),
                                   timeout=10, json=field)
-                    logger.info(f"Airtable: created field {field['name']} in {tbl_name}")
+                    if r2.ok:
+                        logger.info(f"Airtable: created field {field['name']} in {tbl_name}")
+                    else:
+                        logger.warning(f"Airtable: field {field['name']} failed: {r2.text}")
 
         logger.info("Airtable schema setup complete ✅")
     except Exception as e:
