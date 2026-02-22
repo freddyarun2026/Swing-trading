@@ -377,7 +377,8 @@ TICKER_MARKET_CAP_MIDCAP = {t: "midcap" for t in NIFTY_MIDCAP150_TICKERS}
 
 import time as _time
 
-_SCAN_LOCK = threading.Lock()
+_SCAN_LOCK = threading.Lock()           # protects cache dicts
+_SCAN_SEMAPHORE = threading.Semaphore(1) # only ONE yfinance scan at a time (OOM prevention)
 SCAN_INTERVAL_SECONDS = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))  # default 5 min
 
 # ── Disk-backed cache — survives Render worker restarts ──────────────────────
@@ -455,23 +456,28 @@ def _run_background_scanner():
 
     while True:
         try:
-            logger.info("Background scanner: running scan...")
-            results = engine.scan_stocks_public(
-                tickers        = NIFTY50_TICKERS,
-                sector_map     = TICKER_SECTOR,
-                market_cap_map = TICKER_MARKET_CAP,
-            )
-            ts = datetime.utcnow().isoformat() + "Z"
-            with _SCAN_LOCK:
-                _SCAN_CACHE = {
-                    "results":      results,
-                    "status":       "ready",
-                    "last_updated": ts,
-                    "count":        len(results),
-                    "scanned":      len(NIFTY50_TICKERS),
-                }
-            logger.info(f"Background scanner: done — {len(results)} setups found.")
-            _save_disk_cache(_SCAN_CACHE)  # persist so restarts load instantly
+            logger.info("Background scanner: waiting for scan slot...")
+            _SCAN_SEMAPHORE.acquire()
+            try:
+                logger.info("Background scanner: running scan...")
+                results = engine.scan_stocks_public(
+                    tickers        = NIFTY50_TICKERS,
+                    sector_map     = TICKER_SECTOR,
+                    market_cap_map = TICKER_MARKET_CAP,
+                )
+                ts = datetime.utcnow().isoformat() + "Z"
+                with _SCAN_LOCK:
+                    _SCAN_CACHE = {
+                        "results":      results,
+                        "status":       "ready",
+                        "last_updated": ts,
+                        "count":        len(results),
+                        "scanned":      len(NIFTY50_TICKERS),
+                    }
+                logger.info(f"Background scanner: done — {len(results)} setups found.")
+                _save_disk_cache(_SCAN_CACHE)
+            finally:
+                _SCAN_SEMAPHORE.release()
 
         except Exception as e:
             logger.error(f"Background scanner error: {e}")
@@ -688,23 +694,28 @@ def scan_midcap():
             def _do_midcap_scan():
                 global _MIDCAP_CACHE
                 try:
-                    logger.info("On-demand midcap scan: starting...")
-                    results = engine.scan_stocks_public(
-                        tickers        = NIFTY_MIDCAP150_TICKERS,
-                        sector_map     = TICKER_SECTOR_MIDCAP,
-                        market_cap_map = TICKER_MARKET_CAP_MIDCAP,
-                    )
-                    ts = datetime.utcnow().isoformat() + "Z"
-                    with _SCAN_LOCK:
-                        _MIDCAP_CACHE = {
-                            "results":      results,
-                            "status":       "ready",
-                            "last_updated": ts,
-                            "count":        len(results),
-                            "scanned":      len(NIFTY_MIDCAP150_TICKERS),
-                        }
-                    logger.info(f"On-demand midcap scan: done — {len(results)} results")
-                    _save_midcap_cache(_MIDCAP_CACHE)
+                    logger.info("On-demand midcap scan: waiting for scan slot...")
+                    _SCAN_SEMAPHORE.acquire()  # wait for nifty50 to finish if running
+                    try:
+                        logger.info("On-demand midcap scan: starting...")
+                        results = engine.scan_stocks_public(
+                            tickers        = NIFTY_MIDCAP150_TICKERS,
+                            sector_map     = TICKER_SECTOR_MIDCAP,
+                            market_cap_map = TICKER_MARKET_CAP_MIDCAP,
+                        )
+                        ts = datetime.utcnow().isoformat() + "Z"
+                        with _SCAN_LOCK:
+                            _MIDCAP_CACHE = {
+                                "results":      results,
+                                "status":       "ready",
+                                "last_updated": ts,
+                                "count":        len(results),
+                                "scanned":      len(NIFTY_MIDCAP150_TICKERS),
+                            }
+                        logger.info(f"On-demand midcap scan: done — {len(results)} results")
+                        _save_midcap_cache(_MIDCAP_CACHE)
+                    finally:
+                        _SCAN_SEMAPHORE.release()
                 except Exception as e:
                     logger.error(f"On-demand midcap scan error: {e}")
                 finally:
