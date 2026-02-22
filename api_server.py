@@ -692,6 +692,123 @@ def _at_delete(table: str, record_id: str):
     r = requests.delete(url, headers=_at_headers(), timeout=10)
     r.raise_for_status()
 
+# ── Airtable schema — field definitions per table ─────────────────────────
+_AT_SCHEMA = {
+    TBL_ACTIVE: [
+        {"name": "ticker",            "type": "singleLineText"},
+        {"name": "entry_price",       "type": "number", "options": {"precision": 2}},
+        {"name": "stop_loss",         "type": "number", "options": {"precision": 2}},
+        {"name": "original_sl",       "type": "number", "options": {"precision": 2}},
+        {"name": "target1",           "type": "number", "options": {"precision": 2}},
+        {"name": "target2",           "type": "number", "options": {"precision": 2}},
+        {"name": "setup_type",        "type": "singleLineText"},
+        {"name": "sector",            "type": "singleLineText"},
+        {"name": "universe",          "type": "singleLineText"},
+        {"name": "quantity",          "type": "number", "options": {"precision": 0}},
+        {"name": "entry_date",        "type": "singleLineText"},
+        {"name": "status",            "type": "singleLineText"},
+        {"name": "partial_exit_done", "type": "singleLineText"},
+        {"name": "risk_reward",       "type": "number", "options": {"precision": 2}},
+        {"name": "notes",             "type": "singleLineText"},
+        {"name": "partial_exit_price","type": "number", "options": {"precision": 2}},
+        {"name": "partial_exit_qty",  "type": "number", "options": {"precision": 0}},
+        {"name": "partial_pnl",       "type": "number", "options": {"precision": 2}},
+    ],
+    TBL_LOG: [
+        {"name": "trade_id",    "type": "singleLineText"},
+        {"name": "ticker",      "type": "singleLineText"},
+        {"name": "action",      "type": "singleLineText"},
+        {"name": "action_date", "type": "singleLineText"},
+        {"name": "price",       "type": "number", "options": {"precision": 2}},
+        {"name": "quantity",    "type": "number", "options": {"precision": 0}},
+        {"name": "old_sl",      "type": "number", "options": {"precision": 2}},
+        {"name": "new_sl",      "type": "number", "options": {"precision": 2}},
+        {"name": "notes",       "type": "singleLineText"},
+    ],
+    TBL_CLOSED: [
+        {"name": "ticker",       "type": "singleLineText"},
+        {"name": "entry_price",  "type": "number", "options": {"precision": 2}},
+        {"name": "stop_loss",    "type": "number", "options": {"precision": 2}},
+        {"name": "target1",      "type": "number", "options": {"precision": 2}},
+        {"name": "target2",      "type": "number", "options": {"precision": 2}},
+        {"name": "setup_type",   "type": "singleLineText"},
+        {"name": "sector",       "type": "singleLineText"},
+        {"name": "universe",     "type": "singleLineText"},
+        {"name": "quantity",     "type": "number", "options": {"precision": 0}},
+        {"name": "entry_date",   "type": "singleLineText"},
+        {"name": "exit_price",   "type": "number", "options": {"precision": 2}},
+        {"name": "exit_date",    "type": "singleLineText"},
+        {"name": "exit_pnl",     "type": "number", "options": {"precision": 2}},
+        {"name": "total_pnl",    "type": "number", "options": {"precision": 2}},
+        {"name": "pnl_pct",      "type": "number", "options": {"precision": 2}},
+        {"name": "outcome",      "type": "singleLineText"},
+        {"name": "days_held",    "type": "number", "options": {"precision": 0}},
+        {"name": "partial_pnl",  "type": "number", "options": {"precision": 2}},
+        {"name": "risk_reward",  "type": "number", "options": {"precision": 2}},
+    ],
+    TBL_REVIEWS: [
+        {"name": "trade_id",        "type": "singleLineText"},
+        {"name": "ticker",          "type": "singleLineText"},
+        {"name": "review_date",     "type": "singleLineText"},
+        {"name": "current_price",   "type": "number", "options": {"precision": 2}},
+        {"name": "pnl_pct",         "type": "number", "options": {"precision": 2}},
+        {"name": "r_multiple",      "type": "number", "options": {"precision": 2}},
+        {"name": "action",          "type": "singleLineText"},
+        {"name": "recommendations", "type": "multilineText"},
+    ],
+}
+
+def _at_setup_schema():
+    """
+    Create all required fields in each Airtable table.
+    Renames the default 'Name' field to 'ticker' and creates all others.
+    Safe to run multiple times — skips existing fields.
+    """
+    if not AIRTABLE_TOKEN:
+        logger.warning("AIRTABLE_TOKEN not set — trade storage disabled")
+        return
+    try:
+        meta_url = f"https://api.airtable.com/v0/meta/bases/{AIRTABLE_BASE_ID}/tables"
+        r = requests.get(meta_url, headers=_at_headers(), timeout=10)
+        r.raise_for_status()
+        tables = {t["name"]: t for t in r.json().get("tables", [])}
+
+        for tbl_name, fields in _AT_SCHEMA.items():
+            if tbl_name not in tables:
+                logger.warning(f"Airtable: table {tbl_name} not found — create it manually")
+                continue
+
+            tbl      = tables[tbl_name]
+            tbl_id   = tbl["id"]
+            existing = {f["name"] for f in tbl.get("fields", [])}
+            fields_url = f"https://api.airtable.com/v0/meta/bases/{AIRTABLE_BASE_ID}/tables/{tbl_id}/fields"
+
+            # Rename default "Name" field to first field in schema (ticker)
+            name_field = next((f for f in tbl.get("fields", []) if f["name"] == "Name"), None)
+            if name_field and fields[0]["name"] not in existing:
+                requests.patch(
+                    f"{fields_url}/{name_field['id']}",
+                    headers=_at_headers(), timeout=10,
+                    json={"name": fields[0]["name"]}
+                )
+                existing.discard("Name")
+                existing.add(fields[0]["name"])
+                logger.info(f"Airtable: renamed Name→{fields[0]['name']} in {tbl_name}")
+
+            # Create missing fields
+            for field in fields[1:]:  # skip first (already renamed)
+                if field["name"] not in existing:
+                    requests.post(fields_url, headers=_at_headers(),
+                                  timeout=10, json=field)
+                    logger.info(f"Airtable: created field {field['name']} in {tbl_name}")
+
+        logger.info("Airtable schema setup complete ✅")
+    except Exception as e:
+        logger.error(f"Airtable schema setup failed: {e}")
+
+_at_setup_schema()
+
+
 
 
 
