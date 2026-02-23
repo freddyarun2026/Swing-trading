@@ -831,7 +831,9 @@ def _resolve_tickers(body: dict) -> list:
 @app.route("/api/trades/active", methods=["GET"])
 def get_active_trades():
     try:
-        docs = _at_list(TBL_ACTIVE)
+        raw  = _at_list(TBL_ACTIVE)
+        # Filter out empty Airtable default rows
+        docs = [t for t in raw if t.get("ticker") and t.get("entry_price")]
         return safe_jsonify({"trades": docs, "count": len(docs)})
     except Exception as e:
         logger.exception("get_active_trades error")
@@ -1063,7 +1065,9 @@ def record_action():
 @app.route("/api/trades/performance", methods=["GET"])
 def trade_performance():
     try:
-        trades = _at_list(TBL_CLOSED)
+        raw = _at_list(TBL_CLOSED)
+        # Filter out empty Airtable default rows — must have ticker and exit_price
+        trades = [t for t in raw if t.get("ticker") and t.get("exit_price")]
         if not trades:
             return safe_jsonify({"message": "No closed trades yet.", "stats": {}, "recent_trades": []})
 
@@ -1103,18 +1107,43 @@ def trade_performance():
 
 @app.route("/api/trades/cleanup", methods=["POST"])
 def cleanup_duplicates():
-    """Delete duplicate trades keeping only the latest per ticker."""
+    """Delete empty/invalid rows from all Airtable tables and deduplicate active trades."""
     try:
-        all_trades = _at_list(TBL_ACTIVE)
-        seen = {}
         deleted = 0
-        for t in all_trades:
+
+        # Clean active_trades — remove empty rows and duplicates
+        all_active = _at_list(TBL_ACTIVE)
+        seen = {}
+        for t in all_active:
             ticker = t.get("ticker","")
-            if ticker in seen:
+            if not ticker or not t.get("entry_price"):
+                _at_delete(TBL_ACTIVE, t["$id"])
+                deleted += 1
+            elif ticker in seen:
                 _at_delete(TBL_ACTIVE, t["$id"])
                 deleted += 1
             else:
                 seen[ticker] = t["$id"]
+
+        # Clean closed_trades — remove empty rows
+        for t in _at_list(TBL_CLOSED):
+            if not t.get("ticker") or not t.get("exit_price"):
+                _at_delete(TBL_CLOSED, t["$id"])
+                deleted += 1
+
+        # Clean trade_log — remove empty rows
+        for t in _at_list(TBL_LOG):
+            if not t.get("ticker") or not t.get("action"):
+                _at_delete(TBL_LOG, t["$id"])
+                deleted += 1
+
+        # Clean eod_reviews — remove empty rows
+        for t in _at_list(TBL_REVIEWS):
+            if not t.get("trade_id") or not t.get("ticker"):
+                _at_delete(TBL_REVIEWS, t["$id"])
+                deleted += 1
+
+        logger.info(f"Cleanup: deleted {deleted} empty/duplicate records")
         return safe_jsonify({"success": True, "deleted": deleted, "remaining": len(seen)})
     except Exception as e:
         return _err(str(e))
