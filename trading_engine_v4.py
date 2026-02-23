@@ -1531,17 +1531,17 @@ class ActionCommandEngine:
                 return {"command": "TRAP ALERT", "color": "#FF0055", "icon": "🚨",
                         "detail": f"Trap {trap_prob:.0f}% — avoid entry", "priority": 1}
             if vol_ratio >= 2.5 and pivot_dist <= 1.0 and status == TradeStatus.READY:
-                return {"command": "EXECUTE NOW", "color": "#00FF9D", "icon": "⚡",
-                        "detail": f"At pivot with {vol_ratio:.1f}x institutional volume", "priority": 2}
+                return {"command": "BUY NOW", "color": "#00FF9D", "icon": "⚡",
+                        "detail": f"At pivot with {vol_ratio:.1f}x volume — enter tomorrow open", "priority": 2}
             if (setup_type == SetupType.BREAKOUT and vol_ratio < 0.8
                     and classification.get("is_contracting", False)):
-                return {"command": "ACCUMULATE", "color": "#00F0FF", "icon": "📦",
-                        "detail": f"VCP quiet phase — vol {vol_ratio:.1f}x, {pivot_dist:.1f}% from pivot", "priority": 3}
+                return {"command": "WATCH", "color": "#00F0FF", "icon": "👀",
+                        "detail": f"VCP forming — vol {vol_ratio:.1f}x, {pivot_dist:.1f}% from pivot. Wait for breakout", "priority": 3}
             if setup_type in (SetupType.MOMENTUM, SetupType.POWER_PLAY) and dist_ema20 > 3:
-                return {"command": "HOLD & TRAIL", "color": "#FFBF00", "icon": "🔒",
-                        "detail": f"Extended {dist_ema20:.1f}% from EMA20 — trail stop", "priority": 4}
+                return {"command": "AVOID", "color": "#FF0055", "icon": "⛔",
+                        "detail": f"Extended {dist_ema20:.1f}% from EMA20 — wait for pullback", "priority": 4}
             return {"command": "WATCH", "color": "#FFBF00", "icon": "👀",
-                    "detail": f"{pivot_dist:.1f}% from pivot, vol {vol_ratio:.1f}x", "priority": 5}
+                    "detail": f"{pivot_dist:.1f}% from pivot, vol {vol_ratio:.1f}x — not triggered yet", "priority": 5}
         except Exception as e:
             return {"command": "WATCH", "color": "#FFBF00", "icon": "👀", "detail": str(e), "priority": 5}
 
