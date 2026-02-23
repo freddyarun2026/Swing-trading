@@ -127,6 +127,7 @@ from trading_engine_v4 import (
     ActiveTradeEvaluator,
     MarketRegimeEngine,
     MarketBreadthEngine,
+    _yf_download,
     VolatilityRegimeEngine,
     SectorLeadershipEngine,
     RegimeType,
@@ -1146,6 +1147,24 @@ def cleanup_duplicates():
         logger.info(f"Cleanup: deleted {deleted} empty/duplicate records")
         return safe_jsonify({"success": True, "deleted": deleted, "remaining": len(seen)})
     except Exception as e:
+        return _err(str(e))
+
+
+@app.route("/api/trades/log", methods=["GET"])
+def get_trade_log():
+    """Get action log for a specific trade."""
+    try:
+        trade_id = request.args.get("trade_id")
+        if not trade_id:
+            return _err("Missing trade_id", 400)
+        formula = f"{{trade_id}}='{trade_id}'"
+        logs = _at_list(TBL_LOG, formula=formula)
+        # Filter empty rows and sort by date
+        logs = [l for l in logs if l.get("action") and l.get("trade_id")]
+        logs.sort(key=lambda x: x.get("action_date",""), reverse=True)
+        return safe_jsonify({"logs": logs})
+    except Exception as e:
+        logger.exception("get_trade_log error")
         return _err(str(e))
 
 
